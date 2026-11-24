@@ -24,8 +24,8 @@ class Config:
     first_run_done: bool = False
     target_chosen: bool = False  # the first run language question was answered
     debug_blocks: bool = False
-    # Disables Intel MKL in CTranslate2: ~1.9 GB less committed memory per loaded model,
-    # about 25 % slower translation. Physical RAM use is the same either way.
+    # Disables MKL weight pre-packing in CTranslate2: committed memory drops from 2-3.3 GB to
+    # ~0.6 GB, translation gets ~20 % slower. RAM in Task Manager is the same either way.
     low_memory: bool = False
 
     @classmethod

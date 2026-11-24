@@ -351,7 +351,9 @@ def main(argv: list[str] | None = None) -> int:
     if Config.load().low_memory:
         import os
 
-        os.environ["CT2_USE_MKL"] = "0"  # must be set before ctranslate2 is imported
+        # Keep MKL but do not pre-pack weights: much less committed memory, ~20 % slower.
+        # Must be set before ctranslate2 is first used.
+        os.environ["CT2_PACKED_GEMM"] = "0"
 
     if args.selftest:
         return selftest(args.selftest, args.target, args.selftest_out)

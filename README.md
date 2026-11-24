@@ -27,8 +27,9 @@ shortcut, start with Windows and lets you delete downloaded models.
 
 Models are stored in `%LOCALAPPDATA%\KeepT\models`, settings in
 `%APPDATA%\KeepT\config.json` and the log in `%LOCALAPPDATA%\KeepT\keept.log`.
-Set `"low_memory": true` in the config to disable Intel MKL in CTranslate2
-(much less committed memory, about 25 % slower).
+Set `"low_memory": true` in the config to disable MKL weight pre-packing in
+CTranslate2 (committed memory drops from 2-3 GB to about 0.6 GB, about 20 % slower;
+the RAM shown in Task Manager is about 400 MB either way).
 
 If Windows lacks the OCR pack for a language, KeepT tells you once from the tray.
 It can be added in Settings > Time & language > Language, or as administrator:
