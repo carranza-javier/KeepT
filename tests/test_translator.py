@@ -1,0 +1,179 @@
+import io
+import json
+import zipfile
+
+import pytest
+
+from keept.translate.models import ModelError, ModelStore
+from keept.translate.translator import Translator, match_case, route, split_sentences
+
+
+class FakeModel:
+    """Marks each sentence with the pair so pivots can be checked."""
+
+    def __init__(self, src, tgt):
+        self.src, self.tgt = src, tgt
+        self.calls = []
+
+    def translate(self, sentences):
+        self.calls.append(list(sentences))
+        return [f"[{self.src}>{self.tgt}]{s}" for s in sentences]
+
+
+@pytest.fixture
+def translator(tmp_path):
+    loaded = {}
+
+    def loader(src, tgt, progress):
+        loaded[(src, tgt)] = FakeModel(src, tgt)
+        return loaded[(src, tgt)]
+
+    t = Translator(ModelStore(tmp_path), loader=loader)
+    t.loaded = loaded
+    return t
+
+
+def test_route_direct_and_pivot():
+    assert route("de", "en") == [("de", "en")]
+    assert route("es", "en") == [("es", "en")]
+    assert route("de", "es") == [("de", "en"), ("en", "es")]
+    assert route("es", "de") == [("es", "en"), ("en", "de")]
+    assert route("en", "en") == []
+
+
+def test_split_sentences():
+    assert split_sentences("No se pudo guardar el archivo. Inténtalo de nuevo.") == [
+        "No se pudo guardar el archivo.",
+        "Inténtalo de nuevo.",
+    ]
+    assert split_sentences("Siehe z.B. Seite 3. Danach weiter.") == ["Siehe z.B. Seite 3.", "Danach weiter."]
+    assert split_sentences("Version 2.5 is out! ¿Qué tal? Bien.") == ["Version 2.5 is out!", "¿Qué tal?", "Bien."]
+    assert split_sentences("  ") == []
+
+
+def test_translate_direct(translator):
+    out = translator.translate(["Hallo Welt. Wie geht's?"], "de", "en")
+    assert out == ["[de>en]Hallo Welt. [de>en]Wie geht's?"]
+
+
+def test_translate_pivot_through_english(translator):
+    out = translator.translate(["Hallo."], "de", "es")
+    assert out == ["[en>es][de>en]Hallo."]
+    assert set(translator.loaded) == {("de", "en"), ("en", "es")}
+
+
+def test_batches_all_sentences_in_one_call(translator):
+    translator.translate(["A one. A two.", "B one."], "en", "de")
+    assert translator.loaded[("en", "de")].calls == [["A one.", "A two.", "B one."]]
+
+
+def test_cache_avoids_retranslation(translator):
+    translator.translate(["Same text."], "en", "es")
+    translator.translate(["Same text.", "New text."], "en", "es")
+    assert translator.loaded[("en", "es")].calls == [["Same text."], ["New text."]]
+
+
+def test_same_language_is_identity(translator):
+    assert translator.translate(["Hola"], "es", "es") == ["Hola"]
+    assert translator.loaded == {}
+
+
+def test_match_case():
+    assert match_case("SETTINGS", "Ajustes") == "AJUSTES"
+    assert match_case("Settings", "Ajustes") == "Ajustes"
+
+
+# -- model store -------------------------------------------------------------
+def make_package(prefix="translate-de_en-1_3/", tokenizer="sentencepiece.model", extra=None):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(prefix + "model/model.bin", b"bin")
+        zf.writestr(prefix + "model/config.json", b"{}")
+        zf.writestr(prefix + tokenizer, b"tok")
+        zf.writestr(prefix + "stanza/de/tokenize/gsd.pt", b"big")
+        zf.writestr(prefix + "metadata.json", b"{}")
+        for name, data in (extra or {}).items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+class FakeResponse(io.BytesIO):
+    def __init__(self, data):
+        super().__init__(data)
+        self.headers = {"Content-Length": str(len(data))}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.close()
+
+
+def fake_opener(package, index=None):
+    index = index if index is not None else [
+        {"from_code": "de", "to_code": "en", "package_version": "1.3", "links": ["https://example.invalid/de_en.argosmodel"]}
+    ]
+
+    def opener(url, timeout=0):
+        if url.endswith("index.json"):
+            return FakeResponse(json.dumps(index).encode())
+        return FakeResponse(package)
+
+    return opener
+
+
+def test_store_installs_package_without_stanza(tmp_path):
+    store = ModelStore(tmp_path, opener=fake_opener(make_package()))
+    progress = []
+    info = store.ensure("de", "en", lambda done, total: progress.append((done, total)))
+    assert info.tokenizer == "spm" and info.version == "1.3"
+    assert (info.path / "model" / "model.bin").read_bytes() == b"bin"
+    assert not (info.path / "stanza").exists()
+    assert progress and progress[-1][0] == progress[-1][1]
+    assert [m.src + m.tgt for m in store.installed()] == ["deen"]
+    store.delete("de", "en")
+    assert store.get("de", "en") is None
+
+
+def test_store_detects_bpe_tokenizer(tmp_path):
+    store = ModelStore(tmp_path, opener=fake_opener(make_package("en_es/", "bpe.model")))
+    assert store.ensure("de", "en").tokenizer == "bpe"
+
+
+def test_store_rejects_corrupt_download(tmp_path):
+    store = ModelStore(tmp_path, opener=fake_opener(b"not a zip"))
+    with pytest.raises(ModelError) as err:
+        store.ensure("de", "en")
+    assert err.value.kind == "corrupt"
+    assert store.get("de", "en") is None
+    assert not any(p.name.endswith(".part") for p in tmp_path.iterdir())
+
+
+def test_store_rejects_path_traversal(tmp_path):
+    pkg = make_package(prefix="", extra={"model/../../evil.txt": b"x"})
+    store = ModelStore(tmp_path / "models", opener=fake_opener(pkg))
+    with pytest.raises(ModelError):
+        store.ensure("de", "en")
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_store_falls_back_to_builtin_links(tmp_path):
+    calls = []
+
+    def opener(url, timeout=0):
+        calls.append(url)
+        if url.endswith("index.json"):
+            raise OSError("offline")
+        return FakeResponse(make_package())
+
+    ModelStore(tmp_path, opener=opener).ensure("de", "en")
+    assert calls[-1] == "https://argos-net.com/v1/translate-de_en-1_3.argosmodel"
+
+
+def test_network_error_is_reported_as_network(tmp_path):
+    def opener(url, timeout=0):
+        raise OSError("no route to host")
+
+    with pytest.raises(ModelError) as err:
+        ModelStore(tmp_path, opener=opener).ensure("de", "en")
+    assert err.value.kind == "network"
