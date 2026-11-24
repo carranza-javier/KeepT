@@ -157,6 +157,67 @@ def free_space_below(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> fl
     return free_space_right(transposed, Rect(rect.y, rect.x, rect.h, rect.w), bg, max_px)
 
 
+def free_space_above(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:
+    """How far (px) the background continues above `rect` without other content."""
+    flipped = np.ascontiguousarray(bgra[::-1])
+    h = bgra.shape[0]
+    return free_space_below(flipped, Rect(rect.x, h - rect.bottom, rect.w, rect.h), bg, max_px)
+
+
+@dataclass
+class ButtonShape:
+    rect: Rect  # button bounds in physical px
+    radius: float  # corner radius
+    room_left: float  # free space outside the button, where its background may grow
+    room_right: float
+
+
+def _close(a, b, tol: int = 40) -> bool:
+    return int(np.abs(np.asarray(a, np.int16) - np.asarray(b, np.int16)).sum()) <= tol
+
+
+def button_shape(bgra: np.ndarray, text_rect: Rect, bg: RGB, line_height: float) -> ButtonShape | None:
+    """Bounds, corner radius and free outer room of the button a line of text sits on.
+    None when the background does not end within a few line heights (not a button)."""
+    cap_x, cap_y = line_height * 3.0, line_height * 1.5
+    left = free_space_left(bgra, text_rect, bg, cap_x)
+    right = free_space_right(bgra, text_rect, bg, cap_x)
+    up = free_space_above(bgra, text_rect, bg, cap_y)
+    down = free_space_below(bgra, text_rect, bg, cap_y)
+    if min(cap_x - left, cap_x - right) < 1 or min(cap_y - up, cap_y - down) < 1:
+        return None
+    x0 = math.floor(text_rect.x) - 1 - left
+    x1 = math.ceil(text_rect.right) + 1 + right
+    y0 = math.floor(text_rect.y) - 1 - up
+    y1 = math.ceil(text_rect.bottom) + 1 + down
+    # Horizontal extremes on the middle row (rounded ends reach furthest there).
+    h, w = bgra.shape[:2]
+    cy = int((y0 + y1) / 2)
+    if 0 <= cy < h:
+        while x0 > 0 and _close(bgra[cy, int(x0) - 1, 2::-1], bg):
+            x0 -= 1
+        while x1 < w - 1 and _close(bgra[cy, int(x1), 2::-1], bg):
+            x1 += 1
+    rect = Rect(x0, y0, x1 - x0, y1 - y0)
+    # Corner radius from the diagonal: a circular corner of radius r leaves r*(1 - 1/sqrt 2)
+    # pixels outside the shape along the diagonal from the bounding corner.
+    k = 0
+    while k < rect.h / 2 and 0 <= int(y0) + k < h and 0 <= int(x0) + k < w:
+        if _close(bgra[int(y0) + k, int(x0) + k, 2::-1], bg):
+            break
+        k += 1
+    radius = min(rect.h / 2, k / (1 - 1 / math.sqrt(2)))
+    # Room outside the button, measured on the colour that surrounds it.
+    def outer(xa, xb):
+        box = _clip_box(bgra.shape, xa, rect.y, xb, rect.bottom)
+        return None if box is None else tuple(int(v) for v in np.median(_rgb_pixels(bgra, box), axis=0))
+
+    out_l, out_r = outer(x0 - 5, x0 - 2), outer(x1 + 2, x1 + 5)
+    room_l = free_space_left(bgra, rect, out_l, rect.w) if out_l else 0.0
+    room_r = free_space_right(bgra, rect, out_r, rect.w) if out_r else 0.0
+    return ButtonShape(rect, radius, room_l, room_r)
+
+
 def stroke_ratio(bgra: np.ndarray, rect: Rect, bg: RGB, fg: RGB, em: float) -> float:
     """Average horizontal stroke width of the glyphs divided by the font size.
     Anti-aliased coverage is counted fractionally, so it works for small text too."""

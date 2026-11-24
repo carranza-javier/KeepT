@@ -27,7 +27,7 @@ from ..ocr.pipeline import ScreenText
 from ..platform import services
 from . import effects
 from .pill import SHADOW, LangMenu, Pill, ui_font
-from .render import FitResult, fit_text, free_space_below, free_space_left, free_space_right, is_boxed, sample_background, sample_text_color, stroke_ratio, weight_class
+from .render import FitResult, button_shape, fit_text, free_space_below, free_space_left, free_space_right, is_boxed, sample_background, sample_text_color, stroke_ratio, weight_class
 from .selection import Gesture, block_at, classify, select_blocks
 
 log = logging.getLogger(__name__)
@@ -403,15 +403,12 @@ class OverlayWindow(QWidget):
         if len(block.lines) == 1 and not boxed:
             free = free_space_right(bgra, cover, bg, block.rect.w * 2)
             extra = max(0.0, free - block.font_px * 0.6)
-        elif boxed:
-            # Use the inside of the button, keeping the text centred and some padding.
-            limit = block.rect.w
-            free = min(free_space_left(bgra, cover, bg, limit), free_space_right(bgra, cover, bg, limit))
-            extra = 2 * max(0.0, free - block.font_px * 0.5)
+        button = button_shape(bgra, block.rect, bg, block.line_height) if boxed else None
         below = 0.0 if boxed else free_space_below(bgra, cover, bg, cover.h * 1.5)
         item = Item(block.id, block, frozenset(id(l) for l in block.lines), QColor(*bg), QColor(*fg), boxed,
                     weight=weight, extra_w=extra, t_added=self.now())
         item.meta["free_below"] = below
+        item.meta["button"] = button
         return item
 
     def translate_blocks(self, blocks: list[Block]) -> None:
@@ -458,6 +455,22 @@ class OverlayWindow(QWidget):
         # shorter (a line without ascenders or descenders has a short box).
         height = max(area.h, len(b.lines) * b.font_px * spacing)
         measure = lambda text, px: self._measure(text, px, item.weight)  # noqa: E731
+        button = item.meta.get("button")
+        item.meta["box"] = None
+        if button is not None:
+            # Buttons: use their inside; if the translation still does not fit at a legible
+            # size, widen the button background sideways (over free room) before shrinking.
+            r = button.rect
+            pad = max(b.font_px * 0.6, min(b.rect.x - r.x, r.right - b.rect.right))
+            inner = r.w - 2 * pad
+            need = measure(item.text, b.font_px)  # grow for the original size if there is room
+            grow = 0.0
+            if need > inner:
+                room = 2 * max(0.0, min(button.room_left, button.room_right) - 4 * self.scale)
+                grow = max(0.0, min(need - inner, room, r.w))
+            item.meta["box"] = (Rect(r.x - grow / 2, r.y, r.w + grow, r.h), button.radius)
+            return fit_text(item.text, inner + grow, height, b.font_px, min_px, measure,
+                            line_spacing=spacing, max_grow=1.0)
         # The background may grow down only over free background (never over other text).
         grow = 1.0 + max(0.0, item.meta.get("free_below", 0.0) - b.font_px * 0.3) / max(height, 1.0)
         return fit_text(item.text, area.w + item.extra_w, height, b.font_px, min_px, measure,
@@ -696,7 +709,8 @@ class OverlayWindow(QWidget):
 
     def _paint_item(self, p: QPainter, it: Item, t: float) -> None:
         cover = self.to_logical(self._item_rect(it))
-        radius = min(6.0, cover.height() / 4)
+        box = it.meta.get("box") if it.status == "done" else None
+        radius = box[1] / self.scale if box else min(6.0, cover.height() / 4)
         if it.status == "pending":
             appear = effects.ease_out_cubic((t - it.t_added) / 180)
             effects.paint_shimmer(p, cover, radius, it.bg, t, appear)
@@ -705,7 +719,8 @@ class OverlayWindow(QWidget):
             return
         fade = effects.ease_out_cubic((t - it.t_done) / FADE_MS)
         if fade < 1:
-            effects.paint_shimmer(p, self.to_logical(it.block.cover_rect()), radius, it.bg, t, 1 - fade)
+            effects.paint_shimmer(p, self.to_logical(it.block.cover_rect()), min(6.0, cover.height() / 4),
+                                  it.bg, t, 1 - fade)
         alpha = fade * (1 - self.original_mix)
         if alpha <= 0.01:
             return
@@ -724,7 +739,8 @@ class OverlayWindow(QWidget):
         b = it.block
         font, fm = self._font(fit.px, it.weight)
         s = self.scale
-        cover = self.to_logical(b.cover_rect())
+        box = it.meta.get("box")
+        cover = self.to_logical(box[0] if box else b.cover_rect())
         area = self.to_logical(b.rect)
         lh = fit.line_height / s
         em0 = b.font_px

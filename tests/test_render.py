@@ -134,3 +134,33 @@ def test_highlighted_table_row_is_not_boxed():
     img = canvas(800, 200, (30, 30, 30))
     paint(img, 0, 80, 800, 120, (70, 70, 70))  # full width selected row
     assert not is_boxed(img, Rect(300, 92, 80, 16), (70, 70, 70), 16)
+
+
+def test_button_shape_bounds_radius_and_room():
+    from keept.overlay.render import button_shape
+
+    img = canvas(600, 200, (255, 255, 255))
+    # rounded button 200x50 at (200, 75), radius 25, on a white page; a wall at x=500
+    import math as _m
+
+    for y in range(75, 125):
+        for x in range(200, 400):
+            if x < 225 or x > 374:
+                cx = 225 if x < 225 else 374
+                if _m.hypot(x - cx, y - 100) > 25:
+                    continue
+            img[y, x, :3] = (208, 87, 11)  # BGR of (11, 87, 208)
+    paint(img, 500, 0, 600, 200, (30, 30, 30))
+    shape = button_shape(img, Rect(250, 92, 100, 16), (11, 87, 208), 16)
+    assert shape is not None
+    assert abs(shape.rect.x - 200) <= 1 and abs(shape.rect.right - 400) <= 1
+    assert abs(shape.rect.y - 75) <= 1 and abs(shape.rect.bottom - 125) <= 1
+    assert 18 <= shape.radius <= 25
+    assert 190 <= shape.room_left <= 200 and 95 <= shape.room_right <= 100
+
+
+def test_large_panel_is_not_a_button():
+    from keept.overlay.render import button_shape
+
+    img = canvas(800, 600, (11, 87, 208))
+    assert button_shape(img, Rect(300, 290, 100, 16), (11, 87, 208), 16) is None
