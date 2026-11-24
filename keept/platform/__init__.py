@@ -1,0 +1,58 @@
+"""Platform specific services behind small interfaces.
+
+Everything that depends on the OS (global hotkey, screen capture with DPI, OCR,
+autostart, theme and language) is reached through this module so that a Linux
+port only needs new implementations, without touching the overlay or the
+translation code.
+"""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass
+from typing import Callable, Protocol
+
+
+@dataclass(frozen=True)
+class MonitorInfo:
+    """A monitor in physical (device) pixels."""
+
+    device: str  # e.g. "\\\\.\\DISPLAY1"
+    left: int
+    top: int
+    width: int
+    height: int
+    scale: float  # 1.0, 1.25, 1.5...
+
+
+class HotkeyBackend(Protocol):
+    def start(self, hotkey: "object", on_trigger: Callable[[float], None], on_status: Callable[[bool, str], None]) -> None: ...
+    def set_hotkey(self, hotkey: "object") -> None: ...
+    def stop(self) -> None: ...
+
+
+class PlatformServices(Protocol):
+    def init_process(self) -> None: ...
+    def monitor_at_cursor(self) -> MonitorInfo: ...
+    def hotkey_backend(self) -> HotkeyBackend: ...
+    def system_language(self) -> str: ...
+    def prefers_dark(self) -> bool: ...
+    def autostart_enabled(self) -> bool: ...
+    def set_autostart(self, enabled: bool) -> None: ...
+    def bring_to_front(self, win_id: int) -> None: ...
+    def open_folder(self, path) -> None: ...
+
+
+_services: PlatformServices | None = None
+
+
+def services() -> PlatformServices:
+    global _services
+    if _services is None:
+        if sys.platform == "win32":
+            from .win32 import WindowsServices
+
+            _services = WindowsServices()
+        else:  # pragma: no cover - Linux port comes after v1
+            raise NotImplementedError("KeepT v1 only supports Windows")
+    return _services
