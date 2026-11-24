@@ -149,7 +149,7 @@ def main():
             img = s.grab(s.monitors[idx])
             mss.tools.to_png(img.rgb, img.size, output=sys.argv[2])
     elif cmd == "fg":
-        print(_title(user32.GetForegroundWindow()), foreground_is_keept())
+        print(ascii(_title(user32.GetForegroundWindow())), foreground_is_keept())
 
 
 if __name__ == "__main__":
