@@ -298,13 +298,13 @@ def fit_text(
 ) -> FitResult:
     """Find a font size so the wrapped text fits the block.
 
-    1. Shrink from the original size down to a comfortable floor (82 % of it).
+    1. Shrink from the original size down to a comfortable floor (90 % of it).
     2. If it still does not fit, let the background grow down (up to `max_grow`).
     3. Then keep shrinking down to the minimum legible size.
     4. At the minimum size, grow the background as much as needed.
     """
     start_px = max(start_px, min_px)
-    soft_floor = max(min_px, start_px * 0.82)
+    soft_floor = max(min_px, start_px * 0.9)
     step = max(0.5, start_px * 0.04)
 
     def attempt(px: float) -> tuple[list[str], float]:

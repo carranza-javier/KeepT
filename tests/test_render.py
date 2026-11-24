@@ -90,14 +90,14 @@ def test_fit_shrinks_longer_translation():
     text = "a considerably longer translated sentence"
     r = fit_text(text, 200, 36, 20, 10, mono)
     # shrinks a little, then grows the background rather than becoming tiny
-    assert 20 * 0.82 <= r.px < 20 and r.box_height >= r.height > 36
+    assert 20 * 0.9 <= r.px < 20 and r.box_height >= r.height > 36
     assert all(mono(l, r.px) <= 200 for l in r.lines)
 
 
 def test_fit_without_room_below_keeps_shrinking():
     text = "a considerably longer translated sentence"
     r = fit_text(text, 200, 36, 20, 10, mono, max_grow=1.0)
-    assert r.px < 20 * 0.82 and r.height <= 36 * 1.02 and r.box_height == 36
+    assert r.px < 20 * 0.9 and r.height <= 36 * 1.02 and r.box_height == 36
 
 
 def test_fit_grows_background_before_illegible():

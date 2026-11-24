@@ -52,7 +52,7 @@ class LanguagePrompt(QWidget):
         self.theme = Theme(dark)
         # A floating window over arbitrary content needs a more opaque background than the
         # overlay pill (which always sits on the frozen, dimmed screenshot).
-        self.theme.bg.setAlpha(250)
+        self.theme.bg.setAlpha(255)
         self.label = _Label(self.theme, i18n.tr("onboard_title"))
         lay = QHBoxLayout(self)
         m = SHADOW + 6
