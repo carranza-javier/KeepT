@@ -50,11 +50,13 @@ class KeepTApp:
 
         self.engine = Engine()
         self.engine.preload_status.connect(self._on_preload_status)
-        self.overlay = OverlayWindow(self.engine, self.target, plat.prefers_dark(),
-                                     debug_blocks=args.debug_blocks or self.config.debug_blocks)
-        self.overlay.hint_lang = self.config.last_source_lang
-        self.overlay.closed.connect(self._on_overlay_closed)
-        self.overlay.target_changed.connect(self._on_overlay_target)
+        self._OverlayWindow = OverlayWindow
+        self.overlays: dict = {}  # QScreen -> OverlayWindow (one per monitor, fixed DPI)
+        for screen in qapp.screens():
+            self._add_overlay(screen)
+        self.overlay = self.overlays[qapp.primaryScreen()]
+        qapp.screenAdded.connect(self._add_overlay)
+        qapp.screenRemoved.connect(self._remove_overlay)
 
         self.tray = Tray(self)
 
@@ -82,6 +84,28 @@ class KeepTApp:
         if args.open:
             QTimer.singleShot(300, self.trigger)
 
+    # -- overlays per monitor ----------------------------------------------------------
+    def _add_overlay(self, screen) -> None:
+        if screen in self.overlays:
+            return
+        ov = self._OverlayWindow(self.engine, self.target, services().prefers_dark(),
+                                 debug_blocks=self.args.debug_blocks or self.config.debug_blocks, screen=screen)
+        ov.hint_lang = self.config.last_source_lang
+        ov.closed.connect(lambda ov=ov: self._on_overlay_closed(ov))
+        ov.target_changed.connect(self._on_overlay_target)
+        self.overlays[screen] = ov
+
+    def _remove_overlay(self, screen) -> None:
+        ov = self.overlays.pop(screen, None)
+        if ov is not None:
+            ov.close_overlay()
+            ov.deleteLater()
+            if self.overlay is ov and self.overlays:
+                self.overlay = next(iter(self.overlays.values()))
+
+    def _open_overlay(self):
+        return next((o for o in self.overlays.values() if o.is_open()), None)
+
     # -- startup helpers -------------------------------------------------------------
     def _warm_up(self) -> None:
         """Pay one off initialisation costs now instead of on the first hotkey."""
@@ -93,7 +117,8 @@ class KeepTApp:
             log.warning("Capture warm up failed: %s", exc)
         self.engine.warm_up(self.config.last_source_lang)
         try:
-            self.overlay.warm_up()
+            for ov in self.overlays.values():
+                ov.warm_up()
         except Exception as exc:  # noqa: BLE001
             log.warning("Overlay warm up failed: %s", exc)
         log.info("Warm up done in %.0f ms", (time.perf_counter() - t0) * 1000)
@@ -121,8 +146,9 @@ class KeepTApp:
 
     # -- actions ---------------------------------------------------------------------
     def trigger(self, t_hotkey: float | None = None) -> None:
-        if self.overlay.is_open():
-            self.overlay.close_overlay()
+        current = self._open_overlay()
+        if current is not None:
+            current.close_overlay()
             return
         t0 = t_hotkey or time.perf_counter()
         try:
@@ -132,8 +158,14 @@ class KeepTApp:
             self.tray.notify("KeepT", i18n.tr("err_capture"), warning=True)
             return
         log.info("Captured %dx%d in %.0f ms", capture.width, capture.height, (time.perf_counter() - t0) * 1000)
-        self.overlay.pill.set_theme(services().prefers_dark())
-        self.overlay.open(capture, t0)
+        screen = self._OverlayWindow._screen_for(capture.monitor)
+        if screen is not None and screen not in self.overlays:
+            self._add_overlay(screen)
+        ov = self.overlays.get(screen, self.overlay)
+        ov.pill.set_theme(services().prefers_dark())
+        ov.target = self.target
+        self.overlay = ov
+        ov.open(capture, t0)
 
     def _capture(self) -> Capture:
         if self.fake_capture is not None:
@@ -146,12 +178,15 @@ class KeepTApp:
         self.config.target_lang = code
         self.config.save()
         self.target = self.config.effective_target(self.system_lang)
-        self.overlay.target = self.target
+        for ov in self.overlays.values():
+            ov.target = self.target
         self.engine.preload(self.target, download=False)
 
     def _on_overlay_target(self, code: str) -> None:
         self.config.target_lang = code
         self.target = code
+        for ov in self.overlays.values():
+            ov.target = code
         self.config.save()
 
     def set_hotkey(self, text: str) -> None:
@@ -185,17 +220,68 @@ class KeepTApp:
         else:
             self.tray.update_tooltip(i18n.tr("downloading", pct=int(fraction * 100)))
 
-    def _on_overlay_closed(self) -> None:
-        if self.overlay.hint_lang != self.config.last_source_lang:
-            self.config.last_source_lang = self.overlay.hint_lang
+    def _on_overlay_closed(self, ov) -> None:
+        for other in self.overlays.values():
+            other.hint_lang = ov.hint_lang
+        if ov.hint_lang != self.config.last_source_lang:
+            self.config.last_source_lang = ov.hint_lang
             self.config.save()
 
     def quit(self) -> None:
-        self.overlay.close_overlay()
+        for ov in self.overlays.values():
+            ov.close_overlay()
         self.hotkeys.stop()
         self.engine.shutdown()
         self.tray.hide()
         self.qapp.quit()
+
+
+def selftest(image: str, target: str | None, out: str | None) -> int:
+    """Headless check of the whole pipeline (OCR + language detection + translation) on an
+    image or, with "screen", on the monitor under the cursor. Used to verify packaged builds."""
+    import json
+
+    from PySide6.QtGui import QGuiApplication
+
+    from .ocr import backend
+    from .ocr.pipeline import read_screen
+    from .translate.translator import Translator
+
+    app = QGuiApplication(sys.argv[:1])  # noqa: F841 - QImage needs it
+    report: dict = {"python": sys.version.split()[0], "frozen": bool(getattr(sys, "frozen", False))}
+    try:
+        t0 = time.perf_counter()
+        bgra = ScreenGrabber().grab_cursor_monitor().bgra if image == "screen" else load_image_bgra(image)
+        report["ocr_languages"] = backend().available_languages()
+        text = read_screen(backend(), bgra, "en")
+        report["ocr_ms"] = round((time.perf_counter() - t0) * 1000)
+        tgt = target or Config.load().effective_target(services().system_language())
+        tr = Translator()
+        blocks = [b for b in text.blocks if b.lang != tgt]
+        t1 = time.perf_counter()
+        for src in sorted({b.lang for b in blocks}):
+            tr.prepare(src, tgt)
+        report["model_load_ms"] = round((time.perf_counter() - t1) * 1000)
+        t2 = time.perf_counter()
+        results = []
+        for b in blocks:
+            tb = time.perf_counter()
+            out_text = tr.translate([b.text], b.lang, tgt)[0]
+            results.append({"src": b.lang, "text": b.text, "translation": out_text,
+                            "ms": round((time.perf_counter() - tb) * 1000)})
+        report["translate_ms_total"] = round((time.perf_counter() - t2) * 1000)
+        report["target"] = tgt
+        report["blocks"] = results
+        report["ok"] = bool(results) and all(r["translation"] for r in results)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Selftest failed")
+        report["ok"] = False
+        report["error"] = repr(exc)
+    data = json.dumps(report, ensure_ascii=False, indent=1)
+    log.info("Selftest report: %s", data)
+    if out:
+        Path(out).write_text(data, encoding="utf-8")
+    return 0 if report.get("ok") else 1
 
 
 def _single_instance(qapp, on_message) -> bool:
@@ -230,6 +316,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--fake-capture", metavar="PNG", help="use an image instead of the screen (testing)")
     ap.add_argument("--open", action="store_true", help="open the overlay right after start")
     ap.add_argument("--autostart", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--selftest", metavar="PNG|screen", help="run OCR and translation once and exit")
+    ap.add_argument("--target", help="target language for --selftest")
+    ap.add_argument("--selftest-out", metavar="JSON", help="write the --selftest report here")
     args, _ = ap.parse_known_args(argv)
     return args
 
@@ -241,6 +330,9 @@ def main(argv: list[str] | None = None) -> int:
 
     log_file = setup_logging(args.debug)
     log.info("KeepT %s starting (Python %s), log at %s", __version__, sys.version.split()[0], log_file)
+
+    if args.selftest:
+        return selftest(args.selftest, args.target, args.selftest_out)
 
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QGuiApplication

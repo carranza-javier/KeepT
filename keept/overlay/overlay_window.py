@@ -68,7 +68,9 @@ class OverlayWindow(QWidget):
     closed = Signal()
     target_changed = Signal(str)
 
-    def __init__(self, engine: Engine, target_lang: str, dark: bool, debug_blocks: bool = False):
+    _session_counter = 0  # global so that sessions of different overlay windows never collide
+
+    def __init__(self, engine: Engine, target_lang: str, dark: bool, debug_blocks: bool = False, screen=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
         self.setWindowTitle("KeepT Overlay")
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
@@ -119,8 +121,11 @@ class OverlayWindow(QWidget):
         plat.prepare_overlay_window(self._hwnd)
         plat.set_cloaked(self._hwnd, True)
         self._prev_foreground = 0
-        primary = QGuiApplication.primaryScreen().geometry()
-        self.setGeometry(primary.translated(-20000, -20000))
+        # One overlay per monitor: placing it on its screen once (cloaked) fixes its DPI, so
+        # opening never has to go through a DPI change (which can cost ~300 ms).
+        self.home_screen = screen or QGuiApplication.primaryScreen()
+        self.setScreen(self.home_screen)
+        self.setGeometry(self.home_screen.geometry())
         self.show()
         plat.park_window(self._hwnd)
 
@@ -170,7 +175,8 @@ class OverlayWindow(QWidget):
         return self.state != State.IDLE
 
     def open(self, capture: Capture, t_hotkey: float) -> None:
-        self.session += 1
+        OverlayWindow._session_counter += 1
+        self.session = OverlayWindow._session_counter
         self.engine.set_active(self.session)
         self._reset_session_state()
         self._t_hotkey = t_hotkey
