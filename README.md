@@ -77,3 +77,15 @@ keept/
   translate/        language detection, Argos model store, CTranslate2 translator with pivot
   overlay/          overlay window, effects, pill, selection, rendering helpers
 ```
+
+## Translation models and licenses
+
+KeepT downloads its models on first use; none are bundled in the installer.
+
+- German <-> Spanish: OPUS-MT Tatoeba transformer-big models (`deu-spa`, `spa-deu`) by the
+  Language Technology Research Group at the University of Helsinki, CC-BY 4.0
+  (Tiedemann and Thottingal, "OPUS-MT: Building open translation services for the World", EAMT 2020).
+  Downloaded from the official OPUS-MT storage and converted locally to CTranslate2 int8.
+- German <-> English and English <-> Spanish: Argos Translate packages (derived from OPUS-MT where stated).
+
+`tools/bench/benchmark_mt.py` compares candidate models on `tools/bench/sentences.json`.
