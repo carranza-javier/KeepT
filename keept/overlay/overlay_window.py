@@ -76,6 +76,9 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WA_DeleteOnClose, False)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMouseTracking(True)
+        # Showing with activation makes Windows talk synchronously to the previous foreground
+        # window, which can stall show() for hundreds of ms. Show first, activate right after.
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
         self.engine = engine
         self.target = target_lang
@@ -108,7 +111,18 @@ class OverlayWindow(QWidget):
 
         self._reset_session_state()
         self._fonts: dict[tuple[float, int], tuple[QFont, QFontMetricsF]] = {}
-        self.winId()  # create the native window now so showing it later is instant
+        # The window is shown once and then kept cloaked (invisible through DWM) and parked
+        # off screen while idle. Opening is a move plus uncloak, which is consistently fast,
+        # while show() can stall for hundreds of ms.
+        plat = services()
+        self._hwnd = int(self.winId())
+        plat.prepare_overlay_window(self._hwnd)
+        plat.set_cloaked(self._hwnd, True)
+        self._prev_foreground = 0
+        primary = QGuiApplication.primaryScreen().geometry()
+        self.setGeometry(primary.translated(-20000, -20000))
+        self.show()
+        plat.park_window(self._hwnd)
 
     # ------------------------------------------------------------------ session
     def _reset_session_state(self) -> None:
@@ -134,6 +148,24 @@ class OverlayWindow(QWidget):
         self._first_paint_logged = False
         self._was_active = False
 
+    def warm_up(self) -> None:
+        """Paint one frame off screen so fonts, glyph caches and gradients are ready."""
+        import numpy as np
+
+        from ..platform import MonitorInfo
+
+        bgra = np.zeros((64, 64, 4), np.uint8)
+        self.capture = Capture(MonitorInfo("", 0, 0, 64, 64, 1.0), bgra)
+        self.pixmap = QPixmap.fromImage(QImage(bgra.data, 64, 64, 256, QImage.Format_RGB32))
+        self.clock.start()
+        img = QImage(self.size(), QImage.Format_RGB32)
+        self.render(img)
+        for weight in (0, 1, 2):
+            self._font(20, weight)
+        self._reset_session_state()
+        self._first_paint_logged = True
+        self._fonts.clear()
+
     def is_open(self) -> bool:
         return self.state != State.IDLE
 
@@ -143,18 +175,25 @@ class OverlayWindow(QWidget):
         self._reset_session_state()
         self._t_hotkey = t_hotkey
         self.capture = capture
-        screen = self._screen_for(capture.monitor.device)
+        tm = [time.perf_counter()]
+        plat = services()
+        self._prev_foreground = plat.foreground_window()
+        screen = self._screen_for(capture.monitor)
         if screen is not None:
-            self.setScreen(screen)
+            if self.screen() is not screen:
+                self.setScreen(screen)
             self.setGeometry(screen.geometry())
         else:
             dpr = capture.monitor.scale
             self.setGeometry(int(capture.monitor.left / dpr), int(capture.monitor.top / dpr),
                              int(capture.width / dpr), int(capture.height / dpr))
-        self.scale = capture.width / max(1, self.width())
+        # Exact device pixel ratio of the target screen (width ratios can be off by a fraction
+        # when the resolution is not divisible by the scale, e.g. 1366 px at 125 %).
+        self.scale = screen.devicePixelRatio() if screen is not None else capture.monitor.scale
         img = QImage(capture.bgra.data, capture.width, capture.height, capture.width * 4, QImage.Format_RGB32)
         self.pixmap = QPixmap.fromImage(img)
         self.pixmap.setDevicePixelRatio(self.scale)
+        tm.append(time.perf_counter())
         self.state = State.READY
         self.glow.level = 1.0
         self.pill.set_mode("ready")
@@ -162,19 +201,40 @@ class OverlayWindow(QWidget):
         self.place_pill()
         self.clock.start()
         self.timer.start()
-        self.show()
+        tm.append(time.perf_counter())
+        self.repaint()  # first frame is rendered while still cloaked: no stale frame shows up
+        plat.set_cloaked(self._hwnd, False)
+        tm.append(time.perf_counter())
+        QTimer.singleShot(0, self._activate)
+        tm.append(time.perf_counter())
+        self.engine.start_ocr(self.session, capture.bgra, self.hint_lang)
+        log.debug("open: geometry+pixmap %.0f ms, setup %.0f ms, paint+uncloak %.0f ms, rest %.0f ms",
+                  *[(b - a) * 1000 for a, b in zip(tm, tm[1:])])
+        log.info("Overlay on %s: %dx%d physical, scale %.2f (dpr %.2f)", capture.monitor.device, capture.width,
+                 capture.height, self.scale, self.devicePixelRatioF())
+
+    def _activate(self) -> None:
+        if self.state == State.IDLE:
+            return
+        t0 = time.perf_counter()
         self.raise_()
         self.activateWindow()
         services().bring_to_front(int(self.winId()))
         self.setFocus(Qt.ActiveWindowFocusReason)
-        self.engine.start_ocr(self.session, capture.bgra, self.hint_lang)
-        log.info("Overlay on %s: %dx%d physical, scale %.2f (dpr %.2f)", capture.monitor.device, capture.width,
-                 capture.height, self.scale, self.devicePixelRatioF())
+        log.debug("activation took %.0f ms", (time.perf_counter() - t0) * 1000)
 
     @staticmethod
-    def _screen_for(device: str):
-        for s in QGuiApplication.screens():
-            if s.name() == device:
+    def _screen_for(monitor):
+        """QScreen for a monitor in physical coordinates. Qt keeps each screen's native origin,
+        so origin and physical size identify it (QScreen.name() is a friendly name on some
+        monitors, not the device name)."""
+        screens = QGuiApplication.screens()
+        for s in screens:
+            g, dpr = s.geometry(), s.devicePixelRatio()
+            if (g.x(), g.y()) == (monitor.left, monitor.top) and abs(g.width() * dpr - monitor.width) <= 2:
+                return s
+        for s in screens:
+            if s.name() == monitor.device:
                 return s
         return None
 
@@ -184,7 +244,10 @@ class OverlayWindow(QWidget):
         self.state = State.IDLE
         self.engine.set_active(0)
         self.timer.stop()
-        self.hide()
+        plat = services()
+        plat.set_cloaked(self._hwnd, True)
+        plat.park_window(self._hwnd)
+        plat.restore_foreground(self._prev_foreground)
         self.menu.hide()
         if self.screen_lang:
             self.hint_lang = self.screen_lang
@@ -593,9 +656,10 @@ class OverlayWindow(QWidget):
         self.glow.paint(p, full, t, GLOW_PX)
         self._paint_toasts(p, t)
         p.end()
-        if not self._first_paint_logged:
+        if not self._first_paint_logged and self.state != State.IDLE:
             self._first_paint_logged = True
-            log.info("Overlay visible %.0f ms after hotkey", (time.perf_counter() - self._t_hotkey) * 1000)
+            log.info("Overlay visible %.0f ms after hotkey (first frame painted)",
+                     (time.perf_counter() - self._t_hotkey) * 1000)
 
     def _paint_item(self, p: QPainter, it: Item, t: float) -> None:
         cover = self.to_logical(self._item_rect(it))
@@ -726,7 +790,7 @@ class OverlayWindow(QWidget):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         if self.capture is not None:
-            self.scale = self.capture.width / max(1, self.width())
+            self.scale = self.devicePixelRatioF()
             if self.pixmap is not None:
                 self.pixmap.setDevicePixelRatio(self.scale)
             self._fonts.clear()

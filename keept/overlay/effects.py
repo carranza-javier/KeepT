@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QConicalGradient, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QConicalGradient, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QRegion
 
 PALETTE = [QColor("#00D9C0"), QColor("#3A7BFF"), QColor("#8E5BFF"), QColor("#FF4F9A"), QColor("#FFB23F")]
 
@@ -40,8 +40,11 @@ def conical(center: QPointF, angle: float, alpha: float = 1.0) -> QConicalGradie
 class EdgeGlow:
     """Coloured glow running along the screen edges: ~500 ms entry, then a subtle pulse."""
 
+    DOWNSCALE = 4
+
     def __init__(self) -> None:
         self.level = 1.0  # extra multiplier (lowered while a translation is shown)
+        self._buf: QImage | None = None
 
     def intensity(self, elapsed_ms: float) -> float:
         if elapsed_ms < ENTRY_MS:
@@ -60,19 +63,55 @@ class EdgeGlow:
         k = self.intensity(elapsed_ms) * self.level
         if k <= 0.01:
             return
-        grow = ease_out_cubic(min(1.0, elapsed_ms / ENTRY_MS))
-        grad = conical(rect.center(), self.angle(elapsed_ms))
-        p.save()
-        p.setBrush(Qt.NoBrush)
-        # Fake gaussian blur: wide faint strokes plus a crisp line. Strokes are centred
-        # on the edge so only the inner half is visible.
-        passes = ((4.2, 0.10), (2.8, 0.16), (1.8, 0.26), (1.0, 0.45), (0.45, 0.85))
-        for width, alpha in passes:
-            pen = QPen(QBrush(grad), 2 * glow_px * width * (0.55 + 0.45 * grow))
+        grow = 0.55 + 0.45 * ease_out_cubic(min(1.0, elapsed_ms / ENTRY_MS))
+        angle = self.angle(elapsed_ms)
+        f = self.DOWNSCALE
+        core = glow_px * 0.3 * grow
+        tail = glow_px * 0.75 * grow
+        reach = core + tail * 4.0
+
+        # The glow is soft, so it is rendered at 1/4 resolution and scaled up smoothly
+        # (16 ms -> ~2 ms per frame at 1920x1200).
+        w, h = max(8, math.ceil(rect.width() / f)), max(8, math.ceil(rect.height() / f))
+        if self._buf is None or self._buf.width() != w or self._buf.height() != h:
+            self._buf = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+        self._buf.fill(Qt.transparent)
+        small = QRectF(0, 0, w, h)
+        q = QPainter(self._buf)
+        q.setRenderHint(QPainter.Antialiasing)
+        q.setBrush(Qt.NoBrush)
+        grad = conical(small.center(), angle)
+        # Thin, non overlapping rings whose opacity falls off smoothly from the edge inwards
+        # (bright core plus exponential tail): no visible bands, even on dark backgrounds.
+        step = 0.5
+        d = 0.0
+        while d < reach / f:
+            dist = d * f
+            alpha = 0.95 if dist < core else 0.7 * math.exp(-(dist - core) / tail)
+            pen = QPen(QBrush(grad), step)
             pen.setJoinStyle(Qt.MiterJoin)
-            p.setPen(pen)
-            p.setOpacity(min(1.0, alpha * k))
-            p.drawRect(rect)
+            q.setPen(pen)
+            q.setOpacity(min(1.0, alpha * k))
+            inset = d + step / 2
+            q.drawRect(small.adjusted(inset, inset, -inset, -inset))
+            d += step
+        q.end()
+
+        p.save()
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        border = QRegion(rect.toAlignedRect()).subtracted(
+            QRegion(rect.adjusted(reach + f, reach + f, -reach - f, -reach - f).toAlignedRect()))
+        p.setClipRegion(border)
+        p.drawImage(rect, self._buf)
+        # Crisp line right at the edge, at full resolution.
+        p.setClipping(False)
+        pen = QPen(QBrush(conical(rect.center(), angle)), max(1.5, core))
+        pen.setJoinStyle(Qt.MiterJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.setOpacity(min(1.0, 0.9 * k))
+        inset = max(1.5, core) / 2
+        p.drawRect(rect.adjusted(inset, inset, -inset, -inset))
         p.restore()
 
     @staticmethod

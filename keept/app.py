@@ -91,6 +91,10 @@ class KeepTApp:
         except Exception as exc:  # noqa: BLE001
             log.warning("Capture warm up failed: %s", exc)
         self.engine.warm_up(self.config.last_source_lang)
+        try:
+            self.overlay.warm_up()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Overlay warm up failed: %s", exc)
         log.info("Warm up done in %.0f ms", (time.perf_counter() - t0) * 1000)
 
     def _check_ocr_languages(self) -> None:

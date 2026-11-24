@@ -40,6 +40,8 @@ user32.GetForegroundWindow.restype = wt.HWND
 user32.GetWindowThreadProcessId.argtypes = [wt.HWND, ctypes.POINTER(wt.DWORD)]
 user32.GetWindowThreadProcessId.restype = wt.DWORD
 user32.SetForegroundWindow.argtypes = [wt.HWND]
+user32.IsWindow.argtypes = [wt.HWND]
+user32.SetWindowPos.argtypes = [wt.HWND, wt.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.UINT]
 user32.BringWindowToTop.argtypes = [wt.HWND]
 user32.SetFocus.argtypes = [wt.HWND]
 user32.AttachThreadInput.argtypes = [wt.DWORD, wt.DWORD, wt.BOOL]
@@ -121,6 +123,7 @@ class Win32HotkeyBackend:
 
     def _run(self) -> None:
         self._tid = kernel32.GetCurrentThreadId()
+        log.debug("Hotkey thread id %d", self._tid)
         msg = wt.MSG()
         user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)  # force creation of the message queue
         self._ready.set()
@@ -208,6 +211,35 @@ class WindowsServices:
                         pass
         except OSError as exc:
             log.error("Could not change autostart: %s", exc)
+
+    @staticmethod
+    def _dwm_set(win_id: int, attr: int, value: int) -> bool:
+        try:
+            v = ctypes.c_int(value)
+            return ctypes.windll.dwmapi.DwmSetWindowAttribute(wt.HWND(win_id), attr, ctypes.byref(v), ctypes.sizeof(v)) == 0
+        except Exception as exc:  # noqa: BLE001
+            log.debug("DwmSetWindowAttribute(%d) failed: %s", attr, exc)
+            return False
+
+    def prepare_overlay_window(self, win_id: int) -> None:
+        """No DWM open/close animations (they add a fade and delay)."""
+        self._dwm_set(win_id, 3, 1)  # DWMWA_TRANSITIONS_FORCEDISABLED
+
+    def set_cloaked(self, win_id: int, cloaked: bool) -> None:
+        """Hide/show a window instantly through DWM, without ShowWindow (which can stall)."""
+        self._dwm_set(win_id, 13, 1 if cloaked else 0)  # DWMWA_CLOAK
+
+    def park_window(self, win_id: int) -> None:
+        """Move a window far outside every monitor so it can never get input while idle."""
+        SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
+        user32.SetWindowPos(wt.HWND(win_id), None, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+
+    def foreground_window(self) -> int:
+        return int(user32.GetForegroundWindow() or 0)
+
+    def restore_foreground(self, win_id: int) -> None:
+        if win_id and user32.IsWindow(wt.HWND(win_id)):
+            user32.SetForegroundWindow(wt.HWND(win_id))
 
     def open_folder(self, path: Path) -> None:
         import os

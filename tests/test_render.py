@@ -115,3 +115,9 @@ def test_free_space_right_stops_at_content():
     img2 = canvas(400, 60, (255, 255, 255))
     paint(img2, 200, 0, 400, 60, (30, 30, 30))  # panel edge
     assert 88 <= free_space_right(img2, Rect(50, 20, 60, 20), (255, 255, 255), 300) <= 90
+
+
+def test_title_under_panel_edge_is_not_boxed():
+    img = canvas(300, 200, (200, 210, 225))  # page background
+    paint(img, 0, 60, 300, 200, (253, 246, 227))  # panel starting just above the title
+    assert not is_boxed(img, Rect(40, 80, 120, 20), (253, 246, 227), 20)

@@ -107,18 +107,16 @@ def sample_text_color(bgra: np.ndarray, rect: Rect, bg: RGB) -> RGB:
 
 
 def is_boxed(bgra: np.ndarray, rect: Rect, bg: RGB, line_height: float) -> bool:
-    """True when the text sits on its own small box (a button or a chip): the colour
-    a bit further above and below the text differs from the immediate background."""
+    """True when the text sits on its own small box (a button or a chip): the colour a bit
+    further above AND below the text differs from the immediate background."""
     off = line_height * 1.1
-    probes = []
+    verdicts = []
     for y0, y1 in ((rect.y - off - 3, rect.y - off), (rect.bottom + off, rect.bottom + off + 3)):
         box = _clip_box(bgra.shape, rect.x, y0, rect.right, y1)
         if box:
-            probes.append(_rgb_pixels(bgra, box))
-    if not probes:
-        return False
-    med = np.median(np.concatenate(probes), axis=0)
-    return float(np.abs(med - np.array(bg)).sum()) > 45
+            med = np.median(_rgb_pixels(bgra, box), axis=0)
+            verdicts.append(float(np.abs(med - np.array(bg)).sum()) > 45)
+    return bool(verdicts) and all(verdicts)
 
 
 def free_space_right(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:

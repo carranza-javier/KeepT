@@ -75,8 +75,10 @@ class Engine(QObject):
             t0 = time.perf_counter()
             try:
                 ocr = ocr_backend()
-                if ocr.available_languages():
-                    ocr.recognize(np.full((48, 160, 4), 255, np.uint8), lang)
+                langs = ocr.available_languages()
+                # Every recognizer is used for re-reading blocks, so create them all now.
+                for code in sorted(langs, key=lambda c: c != lang):
+                    ocr.recognize(np.full((48, 160, 4), 255, np.uint8), code)
             except Exception as exc:  # noqa: BLE001
                 log.warning("OCR warm up failed: %s", exc)
             log.info("OCR warm up %.0f ms", (time.perf_counter() - t0) * 1000)

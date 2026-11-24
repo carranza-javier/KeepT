@@ -36,9 +36,9 @@ BUTTONS = [
 ]
 
 
-def render(width: int, height: int, scale: float) -> QImage:
+def render(width: int, height: int, scale: float, page_bg: str = "#c9d3e0") -> QImage:
     img = QImage(width, height, QImage.Format_RGB32)
-    img.fill(QColor("#c9d3e0"))
+    img.fill(QColor(page_bg))
     p = QPainter(img)
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.TextAntialiasing)
@@ -80,9 +80,10 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1200)
     ap.add_argument("--scale", type=float, default=1.5)
+    ap.add_argument("--page-bg", default="#c9d3e0")
     args = ap.parse_args()
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)  # noqa: F841
-    render(args.width, args.height, args.scale).save(args.out)
+    render(args.width, args.height, args.scale, args.page_bg).save(args.out)
     return 0
 
 
