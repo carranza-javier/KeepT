@@ -76,10 +76,13 @@ class KeepTApp:
             # The installer owns the initial "start with Windows" choice; afterwards the tray
             # toggle does. Here we only mirror the real state.
             self.config.autostart = plat.autostart_enabled()
-            self.tray.notify(i18n.tr("tray_ready_title"), i18n.tr("tray_ready_body", hotkey=i18n.hotkey_label(self.config.hotkey)))
             self.config.first_run_done = True
             self.config.save()
-        QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=first_run))
+        self.prompt = None
+        if not self.config.target_chosen:
+            # Ask once which language to translate into; models are downloaded after the answer.
+            QTimer.singleShot(600, self._ask_target)
+        QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=False))
         QTimer.singleShot(2500, self._check_ocr_languages)
         if args.open:
             QTimer.singleShot(300, self.trigger)
@@ -122,6 +125,20 @@ class KeepTApp:
         except Exception as exc:  # noqa: BLE001
             log.warning("Overlay warm up failed: %s", exc)
         log.info("Warm up done in %.0f ms", (time.perf_counter() - t0) * 1000)
+
+    def _ask_target(self) -> None:
+        from .onboarding import LanguagePrompt
+
+        self.prompt = LanguagePrompt(services().prefers_dark(), self.target)
+        self.prompt.chosen.connect(self._on_target_chosen)
+        self.prompt.show_at_bottom()
+
+    def _on_target_chosen(self, code: str) -> None:
+        self.config.target_chosen = True
+        self.set_target(code)  # saves the config and updates every overlay
+        self.engine.preload(code, download=True)
+        self.prompt.confirm(i18n.tr("onboard_done", hotkey=i18n.hotkey_label(self.config.hotkey)))
+        log.info("First run: target language %s chosen", code)
 
     def _check_ocr_languages(self) -> None:
         if self.config.ocr_warning_shown:

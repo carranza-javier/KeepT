@@ -66,6 +66,16 @@ _STRINGS = {
         "en": "Couldn't capture the screen",
         "es": "No he podido capturar la pantalla",
     },
+    "onboard_title": {
+        "de": "In welche Sprache soll KeepT übersetzen?",
+        "en": "Which language should KeepT translate into?",
+        "es": "¿A qué idioma traduce KeepT?",
+    },
+    "onboard_done": {
+        "de": "Fertig. Drücke {hotkey}, um den Bildschirm zu übersetzen.",
+        "en": "All set. Press {hotkey} to translate your screen.",
+        "es": "Listo. Pulsa {hotkey} para traducir la pantalla.",
+    },
     # Tray
     "tray_translate": {"de": "Übersetzen ({hotkey})", "en": "Translate ({hotkey})", "es": "Traducir ({hotkey})"},
     "tray_target": {"de": "Zielsprache", "en": "Translate into", "es": "Traducir a"},
