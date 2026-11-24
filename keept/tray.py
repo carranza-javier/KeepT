@@ -88,7 +88,7 @@ class Tray:
     def update_tooltip(self, status: str | None = None) -> None:
         if status is not None:
             self._status = status
-        text = f"KeepT ({self.app.config.hotkey})"
+        text = f"KeepT ({i18n.hotkey_label(self.app.config.hotkey)})"
         if self._status:
             text += f"\n{self._status}"
         self.icon.setToolTip(text)
@@ -105,7 +105,7 @@ class Tray:
         app, cfg = self.app, self.app.config
         m = self.menu
         m.clear()
-        act = m.addAction(i18n.tr("tray_translate", hotkey=cfg.hotkey))
+        act = m.addAction(i18n.tr("tray_translate", hotkey=i18n.hotkey_label(cfg.hotkey)))
         act.triggered.connect(lambda: app.trigger())
         font = act.font()
         font.setBold(True)
@@ -130,7 +130,7 @@ class Tray:
         if cfg.hotkey not in presets:
             presets.insert(0, cfg.hotkey)
         for text in presets:
-            a = hk_menu.addAction(text)
+            a = hk_menu.addAction(i18n.hotkey_label(text))
             a.setCheckable(True)
             a.setChecked(text == cfg.hotkey)
             a.setActionGroup(hk_group)

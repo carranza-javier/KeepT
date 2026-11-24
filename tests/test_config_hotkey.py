@@ -50,3 +50,14 @@ def test_effective_target():
     assert Config().effective_target("de") == "de"
     assert Config().effective_target("fr") == "en"
     assert Config(target_lang="es").effective_target("de") == "es"
+
+
+def test_hotkey_label_is_localised():
+    from keept import i18n
+
+    i18n.set_ui_lang("de")
+    assert i18n.hotkey_label("Ctrl+Shift+T") == "Strg+Umschalt+T"
+    i18n.set_ui_lang("es")
+    assert i18n.hotkey_label("Ctrl+Shift+Space") == "Ctrl+Mayús+Espacio"
+    i18n.set_ui_lang("en")
+    assert i18n.hotkey_label("Ctrl+Alt+T") == "Ctrl+Alt+T"

@@ -27,7 +27,7 @@ _STRINGS = {
         "es": "El texto ya está en {lang}",
     },
     "downloading": {
-        "de": "Sprachmodell wird geladen… {pct} %",
+        "de": "Sprachmodell wird heruntergeladen… {pct} %",
         "en": "Downloading language model… {pct}%",
         "es": "Descargando modelo de idioma… {pct} %",
     },
@@ -134,6 +134,18 @@ def tr(key: str, **kwargs) -> str:
     entry = _STRINGS[key]
     text = entry.get(_ui_lang) or entry["en"]
     return text.format(**kwargs) if kwargs else text
+
+
+_KEY_NAMES = {
+    "de": {"Ctrl": "Strg", "Shift": "Umschalt", "Space": "Leertaste"},
+    "es": {"Shift": "Mayús", "Space": "Espacio"},
+}
+
+
+def hotkey_label(text: str) -> str:
+    """Hotkey as printed on the user's keyboard, e.g. "Strg+Alt+T" on German Windows."""
+    names = _KEY_NAMES.get(_ui_lang, {})
+    return "+".join(names.get(part, part) for part in text.split("+"))
 
 
 def lang_name(code: str) -> str:

@@ -71,9 +71,10 @@ class KeepTApp:
         self._warm_up()
         first_run = not self.config.first_run_done
         if first_run:
-            if self.config.autostart:
-                plat.set_autostart(True)
-            self.tray.notify(i18n.tr("tray_ready_title"), i18n.tr("tray_ready_body", hotkey=self.config.hotkey))
+            # The installer owns the initial "start with Windows" choice; afterwards the tray
+            # toggle does. Here we only mirror the real state.
+            self.config.autostart = plat.autostart_enabled()
+            self.tray.notify(i18n.tr("tray_ready_title"), i18n.tr("tray_ready_body", hotkey=i18n.hotkey_label(self.config.hotkey)))
             self.config.first_run_done = True
             self.config.save()
         QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=first_run))
@@ -176,7 +177,7 @@ class KeepTApp:
 
     def _on_hotkey_status(self, ok: bool, text: str) -> None:
         if not ok:
-            self.tray.notify("KeepT", i18n.tr("hotkey_busy", hotkey=text), warning=True)
+            self.tray.notify("KeepT", i18n.tr("hotkey_busy", hotkey=i18n.hotkey_label(text)), warning=True)
 
     def _on_preload_status(self, pair: str, fraction: float) -> None:
         if fraction < 0:
