@@ -23,6 +23,9 @@ class Config:
     ocr_warning_shown: bool = False
     first_run_done: bool = False
     debug_blocks: bool = False
+    # Disables Intel MKL in CTranslate2: ~1.9 GB less committed memory per loaded model,
+    # about 25 % slower translation. Physical RAM use is the same either way.
+    low_memory: bool = False
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Config":

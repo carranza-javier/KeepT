@@ -331,6 +331,11 @@ def main(argv: list[str] | None = None) -> int:
     log_file = setup_logging(args.debug)
     log.info("KeepT %s starting (Python %s), log at %s", __version__, sys.version.split()[0], log_file)
 
+    if Config.load().low_memory:
+        import os
+
+        os.environ["CT2_USE_MKL"] = "0"  # must be set before ctranslate2 is imported
+
     if args.selftest:
         return selftest(args.selftest, args.target, args.selftest_out)
 
