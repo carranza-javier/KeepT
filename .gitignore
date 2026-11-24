@@ -1,0 +1,19 @@
+# Local docs (only README.md is versioned)
+*.md
+!README.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Build output
+build/
+dist/
+installer/Output/
+*.spec.bak
+
+# Local artifacts
+shots/
+*.log

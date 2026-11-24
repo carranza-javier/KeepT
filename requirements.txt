@@ -1,0 +1,14 @@
+PySide6-Essentials==6.12.0
+mss==10.2.0
+numpy==2.5.5
+ctranslate2==4.9.1
+sentencepiece==0.2.3
+sacremoses==0.2.0
+subword-nmt==0.3.8
+winrt-runtime==4.2.1
+winrt-Windows.Foundation==4!10.0.28000.2957
+winrt-Windows.Foundation.Collections==4!10.0.28000.2957
+winrt-Windows.Globalization==4!10.0.28000.2957
+winrt-Windows.Graphics.Imaging==4!10.0.28000.2957
+winrt-Windows.Media.Ocr==4!10.0.28000.2957
+winrt-Windows.Storage.Streams==4!10.0.28000.2957
