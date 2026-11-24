@@ -1,0 +1,64 @@
+"""User configuration stored as JSON in %APPDATA%\\KeepT\\config.json."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import asdict, dataclass, fields
+from pathlib import Path
+
+from .paths import config_dir
+
+log = logging.getLogger(__name__)
+
+SUPPORTED_LANGS = ("de", "en", "es")
+
+
+@dataclass
+class Config:
+    hotkey: str = "Ctrl+Alt+T"
+    target_lang: str = ""  # empty means "use the Windows language"
+    autostart: bool = True
+    last_source_lang: str = "en"
+    ocr_warning_shown: bool = False
+    first_run_done: bool = False
+    debug_blocks: bool = False
+
+    @classmethod
+    def load(cls, path: Path | None = None) -> "Config":
+        path = path or default_path()
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return cls()
+        except (OSError, ValueError) as exc:
+            log.warning("Config unreadable (%s), using defaults", exc)
+            return cls()
+        if not isinstance(raw, dict):
+            return cls()
+        known = {f.name for f in fields(cls)}
+        cfg = cls(**{k: v for k, v in raw.items() if k in known})
+        if cfg.target_lang and cfg.target_lang not in SUPPORTED_LANGS:
+            cfg.target_lang = ""
+        if cfg.last_source_lang not in SUPPORTED_LANGS:
+            cfg.last_source_lang = "en"
+        return cfg
+
+    def save(self, path: Path | None = None) -> None:
+        path = path or default_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as exc:
+            log.error("Could not save config: %s", exc)
+
+    def effective_target(self, system_lang: str) -> str:
+        if self.target_lang in SUPPORTED_LANGS:
+            return self.target_lang
+        return system_lang if system_lang in SUPPORTED_LANGS else "en"
+
+
+def default_path() -> Path:
+    return config_dir() / "config.json"
