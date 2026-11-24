@@ -24,6 +24,8 @@ class ScreenText:
     blocks: list[Block]
     screen_lang: str | None
     timings: dict[str, float]
+    engine_lang: str = "en"
+    scale: float = 1.0
 
 
 def _crop(bgra: np.ndarray, r: Rect, pad: float) -> tuple[np.ndarray, float, float]:
@@ -37,7 +39,8 @@ def _offset(lines: list[Line], dx: float, dy: float) -> list[Line]:
     return [Line([Word(wd.text, Rect(wd.rect.x + dx, wd.rect.y + dy, wd.rect.w, wd.rect.h)) for wd in l.words]) for l in lines]
 
 
-def read_screen(ocr: OcrBackend, bgra: np.ndarray, hint_lang: str) -> ScreenText:
+def first_pass(ocr: OcrBackend, bgra: np.ndarray, hint_lang: str) -> ScreenText:
+    """Full screen OCR with one engine, grouping and language detection. Fast (~100-250 ms)."""
     timings: dict[str, float] = {}
     available = ocr.available_languages()
     if not available:
@@ -67,33 +70,55 @@ def read_screen(ocr: OcrBackend, bgra: np.ndarray, hint_lang: str) -> ScreenText
         for b in blocks:
             weights[b.lang] += len(b.text)
         screen_lang = weights.most_common(1)[0][0]
+    log.info("OCR %s x%.0f: %d lines, %d blocks, screen=%s | ocr %.0f ms, layout %.0f ms",
+             lang, scale, len(lines), len(blocks), screen_lang, timings["ocr"] * 1000, timings["layout"] * 1000)
+    st = ScreenText(blocks, screen_lang, timings)
+    st.engine_lang = lang
+    st.scale = scale
+    return st
 
-    # Blocks in another language than the engine we used are read again with the right
-    # engine (only the crop), which fixes accents such as ó read as ö.
-    t2 = time.perf_counter()
-    reread = 0
-    for b in blocks:
-        if b.lang != lang and b.lang in available and len(b.text) >= 3:
-            pad = b.line_height * 0.6
-            crop, dx, dy = _crop(bgra, b.rect, pad)
-            if crop.size == 0:
-                continue
-            try:
-                new_lines = ocr.recognize(crop, b.lang, scale=scale)
-            except Exception as exc:  # noqa: BLE001 - keep the first reading
-                log.debug("Re-OCR failed: %s", exc)
-                continue
-            if not new_lines:
-                continue
-            new_lines = _offset(new_lines, dx, dy)
-            regrouped = group_lines(new_lines)
-            if len(regrouped) == 1 and len(regrouped[0].lines) == len(b.lines):
-                b.lines = regrouped[0].lines
-                reread += 1
-    timings["reread"] = time.perf_counter() - t2
-    log.info(
-        "OCR %s x%.0f: %d lines, %d blocks, screen=%s, reread=%d | ocr %.0f ms, layout %.0f ms, reread %.0f ms",
-        lang, scale, len(lines), len(blocks), screen_lang, reread,
-        timings["ocr"] * 1000, timings["layout"] * 1000, timings["reread"] * 1000,
-    )
-    return ScreenText(blocks, screen_lang, timings)
+
+def needs_reread(block, engine_lang: str, available) -> bool:
+    # English has no accents, so an English block read by another Latin engine is fine.
+    return (block.lang != engine_lang and block.lang in available and block.lang != "en"
+            and len(block.text) >= 3)
+
+
+def refine(ocr: OcrBackend, bgra: np.ndarray, st: ScreenText, alive=lambda: True) -> dict[int, list[Line]]:
+    """Read again, with the matching engine, the crops of blocks in another language than the
+    first pass engine (fixes accents such as ó read as ö). Returns new lines per block id."""
+    t0 = time.perf_counter()
+    available = ocr.available_languages()
+    out: dict[int, list[Line]] = {}
+    for b in st.blocks:
+        if not alive():
+            break
+        if not needs_reread(b, st.engine_lang, available):
+            continue
+        pad = b.line_height * 0.6
+        crop, dx, dy = _crop(bgra, b.rect, pad)
+        if crop.size == 0:
+            continue
+        try:
+            new_lines = ocr.recognize(crop, b.lang, scale=st.scale)
+        except Exception as exc:  # noqa: BLE001 - keep the first reading
+            log.debug("Re-OCR failed: %s", exc)
+            continue
+        if not new_lines:
+            continue
+        regrouped = group_lines(_offset(new_lines, dx, dy))
+        if len(regrouped) == 1 and len(regrouped[0].lines) == len(b.lines):
+            out[b.id] = regrouped[0].lines
+    st.timings["reread"] = time.perf_counter() - t0
+    log.info("OCR refine: %d block(s) re-read in %.0f ms", len(out), st.timings["reread"] * 1000)
+    return out
+
+
+def read_screen(ocr: OcrBackend, bgra: np.ndarray, hint_lang: str) -> ScreenText:
+    """First pass plus refinement, synchronously (tools and selftest)."""
+    st = first_pass(ocr, bgra, hint_lang)
+    new = refine(ocr, bgra, st)
+    for b in st.blocks:
+        if b.id in new:
+            b.lines = new[b.id]
+    return st

@@ -89,8 +89,15 @@ def test_fit_keeps_size_when_it_fits():
 def test_fit_shrinks_longer_translation():
     text = "a considerably longer translated sentence"
     r = fit_text(text, 200, 36, 20, 10, mono)
-    assert r.px < 20 and r.height <= 36 * 1.02 and r.box_height == 36
+    # shrinks a little, then grows the background rather than becoming tiny
+    assert 20 * 0.82 <= r.px < 20 and r.box_height >= r.height > 36
     assert all(mono(l, r.px) <= 200 for l in r.lines)
+
+
+def test_fit_without_room_below_keeps_shrinking():
+    text = "a considerably longer translated sentence"
+    r = fit_text(text, 200, 36, 20, 10, mono, max_grow=1.0)
+    assert r.px < 20 * 0.82 and r.height <= 36 * 1.02 and r.box_height == 36
 
 
 def test_fit_grows_background_before_illegible():
@@ -121,3 +128,9 @@ def test_title_under_panel_edge_is_not_boxed():
     img = canvas(300, 200, (200, 210, 225))  # page background
     paint(img, 0, 60, 300, 200, (253, 246, 227))  # panel starting just above the title
     assert not is_boxed(img, Rect(40, 80, 120, 20), (253, 246, 227), 20)
+
+
+def test_highlighted_table_row_is_not_boxed():
+    img = canvas(800, 200, (30, 30, 30))
+    paint(img, 0, 80, 800, 120, (70, 70, 70))  # full width selected row
+    assert not is_boxed(img, Rect(300, 92, 80, 16), (70, 70, 70), 16)

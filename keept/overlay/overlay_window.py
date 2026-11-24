@@ -27,7 +27,7 @@ from ..ocr.pipeline import ScreenText
 from ..platform import services
 from . import effects
 from .pill import SHADOW, LangMenu, Pill, ui_font
-from .render import FitResult, fit_text, free_space_right, is_boxed, sample_background, sample_text_color, stroke_ratio, weight_class
+from .render import FitResult, fit_text, free_space_below, free_space_left, free_space_right, is_boxed, sample_background, sample_text_color, stroke_ratio, weight_class
 from .selection import Gesture, block_at, classify, select_blocks
 
 log = logging.getLogger(__name__)
@@ -106,6 +106,7 @@ class OverlayWindow(QWidget):
 
         engine.ocr_finished.connect(self._on_ocr_finished)
         engine.ocr_failed.connect(self._on_ocr_failed)
+        engine.ocr_refined.connect(self._on_ocr_refined)
         engine.translated.connect(self._on_translated)
         engine.translation_finished.connect(self._on_translation_finished)
         engine.translation_failed.connect(self._on_translation_failed)
@@ -321,6 +322,21 @@ class OverlayWindow(QWidget):
             self.pill.end_message()
             action[0](*action[1:])
 
+    def _on_ocr_refined(self, session: int, better: dict) -> None:
+        """Better readings (right OCR language) for blocks nobody has asked to translate yet."""
+        if session != self.session or self.state == State.IDLE:
+            return
+        used = set()
+        for it in self.items.values():
+            used |= it.line_ids
+        n = 0
+        for b in self.blocks:
+            lines = better.get(b.id)
+            if lines and not any(id(l) in used for l in b.lines):
+                b.lines = lines
+                n += 1
+        log.info("OCR refined %d block(s) %.0f ms after hotkey", n, (time.perf_counter() - self._t_hotkey) * 1000)
+
     def _on_ocr_failed(self, session: int, kind: str) -> None:
         if session != self.session or self.state == State.IDLE:
             return
@@ -387,8 +403,16 @@ class OverlayWindow(QWidget):
         if len(block.lines) == 1 and not boxed:
             free = free_space_right(bgra, cover, bg, block.rect.w * 2)
             extra = max(0.0, free - block.font_px * 0.6)
-        return Item(block.id, block, frozenset(id(l) for l in block.lines), QColor(*bg), QColor(*fg), boxed,
+        elif boxed:
+            # Use the inside of the button, keeping the text centred and some padding.
+            limit = block.rect.w
+            free = min(free_space_left(bgra, cover, bg, limit), free_space_right(bgra, cover, bg, limit))
+            extra = 2 * max(0.0, free - block.font_px * 0.5)
+        below = 0.0 if boxed else free_space_below(bgra, cover, bg, cover.h * 1.5)
+        item = Item(block.id, block, frozenset(id(l) for l in block.lines), QColor(*bg), QColor(*fg), boxed,
                     weight=weight, extra_w=extra, t_added=self.now())
+        item.meta["free_below"] = below
+        return item
 
     def translate_blocks(self, blocks: list[Block]) -> None:
         tgt = self.target
@@ -434,7 +458,10 @@ class OverlayWindow(QWidget):
         # shorter (a line without ascenders or descenders has a short box).
         height = max(area.h, len(b.lines) * b.font_px * spacing)
         measure = lambda text, px: self._measure(text, px, item.weight)  # noqa: E731
-        return fit_text(item.text, area.w + item.extra_w, height, b.font_px, min_px, measure, line_spacing=spacing)
+        # The background may grow down only over free background (never over other text).
+        grow = 1.0 + max(0.0, item.meta.get("free_below", 0.0) - b.font_px * 0.3) / max(height, 1.0)
+        return fit_text(item.text, area.w + item.extra_w, height, b.font_px, min_px, measure,
+                        line_spacing=spacing, max_grow=max(1.0, min(1.6, grow)))
 
     def _on_translated(self, session: int, key: int, text: str) -> None:
         if session != self.session:

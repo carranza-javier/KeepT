@@ -108,15 +108,26 @@ def sample_text_color(bgra: np.ndarray, rect: Rect, bg: RGB) -> RGB:
 
 def is_boxed(bgra: np.ndarray, rect: Rect, bg: RGB, line_height: float) -> bool:
     """True when the text sits on its own small box (a button or a chip): the colour a bit
-    further above AND below the text differs from the immediate background."""
+    further above AND below the text differs from the immediate background, and so does the
+    colour a few line heights to the left or right (a highlighted table row is not a button)."""
+    bg_a = np.array(bg)
+
+    def differs(x0, y0, x1, y1):
+        box = _clip_box(bgra.shape, x0, y0, x1, y1)
+        if box is None:
+            return None
+        med = np.median(_rgb_pixels(bgra, box), axis=0)
+        return float(np.abs(med - bg_a).sum()) > 45
+
     off = line_height * 1.1
-    verdicts = []
-    for y0, y1 in ((rect.y - off - 3, rect.y - off), (rect.bottom + off, rect.bottom + off + 3)):
-        box = _clip_box(bgra.shape, rect.x, y0, rect.right, y1)
-        if box:
-            med = np.median(_rgb_pixels(bgra, box), axis=0)
-            verdicts.append(float(np.abs(med - np.array(bg)).sum()) > 45)
-    return bool(verdicts) and all(verdicts)
+    vertical = [v for v in (differs(rect.x, rect.y - off - 3, rect.right, rect.y - off),
+                            differs(rect.x, rect.bottom + off, rect.right, rect.bottom + off + 3)) if v is not None]
+    if not vertical or not all(vertical):
+        return False
+    side = line_height * 3.0
+    horizontal = [v for v in (differs(rect.x - side - 3, rect.y, rect.x - side, rect.bottom),
+                              differs(rect.right + side, rect.y, rect.right + side + 3, rect.bottom)) if v is not None]
+    return any(horizontal)
 
 
 def free_space_right(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:
@@ -130,6 +141,20 @@ def free_space_right(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> fl
     differs = np.abs(px - np.array(bg, np.int16)).sum(axis=2) > 40
     busy = np.nonzero(differs.mean(axis=0) > 0.02)[0]
     return float(busy[0]) if len(busy) else float(box[2] - box[0])
+
+
+def free_space_left(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:
+    """Same as free_space_right, towards the left."""
+    flipped = np.ascontiguousarray(bgra[:, ::-1])
+    w = bgra.shape[1]
+    mirrored = Rect(w - rect.right, rect.y, rect.w, rect.h)
+    return free_space_right(flipped, mirrored, bg, max_px)
+
+
+def free_space_below(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:
+    """How far (px) the background continues below `rect` without other content."""
+    transposed = np.ascontiguousarray(bgra.transpose(1, 0, 2))
+    return free_space_right(transposed, Rect(rect.y, rect.x, rect.h, rect.w), bg, max_px)
 
 
 def stroke_ratio(bgra: np.ndarray, rect: Rect, bg: RGB, fg: RGB, em: float) -> float:
@@ -212,13 +237,13 @@ def fit_text(
 ) -> FitResult:
     """Find a font size so the wrapped text fits the block.
 
-    1. Shrink from the original size down to a comfortable floor (65 % of it).
+    1. Shrink from the original size down to a comfortable floor (82 % of it).
     2. If it still does not fit, let the background grow down (up to `max_grow`).
     3. Then keep shrinking down to the minimum legible size.
     4. At the minimum size, grow the background as much as needed.
     """
     start_px = max(start_px, min_px)
-    soft_floor = max(min_px, start_px * 0.65)
+    soft_floor = max(min_px, start_px * 0.82)
     step = max(0.5, start_px * 0.04)
 
     def attempt(px: float) -> tuple[list[str], float]:

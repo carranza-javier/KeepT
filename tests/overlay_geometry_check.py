@@ -27,6 +27,7 @@ from keept.platform import MonitorInfo  # noqa: E402
 class StubEngine(QObject):
     ocr_finished = Signal(int, object)
     ocr_failed = Signal(int, str)
+    ocr_refined = Signal(int, object)
     progress = Signal(int, str, float)
     translated = Signal(int, int, str)
     translation_finished = Signal(int, float)

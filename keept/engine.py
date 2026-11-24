@@ -12,7 +12,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from .ocr import backend as ocr_backend
-from .ocr.pipeline import read_screen
+from .ocr.pipeline import first_pass, refine
 from .translate.models import ModelError
 from .translate.translator import Translator, route
 
@@ -29,6 +29,7 @@ class TranslationJob:
 class Engine(QObject):
     ocr_finished = Signal(int, object)  # session, ScreenText
     ocr_failed = Signal(int, str)  # session, error kind
+    ocr_refined = Signal(int, object)  # session, {block id: better lines}
     progress = Signal(int, str, float)  # session, kind ("download" / "loading"), fraction (-1 unknown)
     translated = Signal(int, int, str)  # session, block key, text
     translation_finished = Signal(int, float)  # session, seconds
@@ -58,15 +59,25 @@ class Engine(QObject):
     def _run_ocr(self, session: int, bgra: np.ndarray, hint_lang: str) -> None:
         if not self._alive(session):
             return
+        ocr = ocr_backend()
         try:
-            result = read_screen(ocr_backend(), bgra, hint_lang)
+            result = first_pass(ocr, bgra, hint_lang)
         except Exception as exc:  # noqa: BLE001 - shown as a human message
             log.exception("OCR failed")
             kind = "no_ocr" if "no OCR language" in str(exc) else "ocr"
             self.ocr_failed.emit(session, kind)
             return
-        if self._alive(session):
-            self.ocr_finished.emit(session, result)
+        if not self._alive(session):
+            return
+        self.ocr_finished.emit(session, result)
+        # Re-reading blocks in other languages comes after, so the overlay can react at once.
+        try:
+            better = refine(ocr, bgra, result, alive=lambda: self._alive(session))
+        except Exception:  # noqa: BLE001
+            log.exception("OCR refinement failed")
+            return
+        if better and self._alive(session):
+            self.ocr_refined.emit(session, better)
 
     def warm_up(self, lang: str) -> None:
         """Load WinRT and the OCR engine once, off the UI thread."""
