@@ -82,7 +82,8 @@ class KeepTApp:
         if not self.config.target_chosen:
             # Ask once which language to translate into; models are downloaded after the answer.
             QTimer.singleShot(600, self._ask_target)
-        QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=False))
+        if self.config.target_chosen:  # on first run, wait for the answer
+            QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=False))
         QTimer.singleShot(2500, self._check_ocr_languages)
         if args.open:
             QTimer.singleShot(300, self.trigger)
@@ -135,7 +136,11 @@ class KeepTApp:
 
     def _on_target_chosen(self, code: str) -> None:
         self.config.target_chosen = True
-        self.set_target(code)  # saves the config and updates every overlay
+        self.config.target_lang = code
+        self.config.save()
+        self.target = code
+        for ov in self.overlays.values():
+            ov.target = code
         self.engine.preload(code, download=True)
         self.prompt.confirm(i18n.tr("onboard_done", hotkey=i18n.hotkey_label(self.config.hotkey)))
         log.info("First run: target language %s chosen", code)

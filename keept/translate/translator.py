@@ -78,6 +78,9 @@ class Translator:
         info = self.store.ensure(src, tgt, progress)
         return LoadedModel(info, self._threads)
 
+    def is_pair_loaded(self, pair: tuple[str, str]) -> bool:
+        return pair in self._models
+
     def is_loaded(self, src: str, tgt: str) -> bool:
         return all(p in self._models for p in route(src, tgt))
 

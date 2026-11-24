@@ -218,3 +218,25 @@ def test_store_installs_marian_package_with_local_conversion(tmp_path, monkeypat
     assert (info.path / "model" / "model.bin").read_bytes() == b"ct2"
     assert (info.path / "source.spm").exists() and (info.path / "LICENSE").exists()
     assert not (info.path / "marian").exists() and not (info.path / "train.log").exists()
+
+
+def test_download_progress_is_visible_to_other_threads(tmp_path):
+    seen = []
+    package = make_package()
+    store_ref = {}
+
+    class Spy(FakeResponse):
+        def read(self, n=-1):
+            seen.append(store_ref["s"].download_progress("de", "en"))
+            return super().read(n)
+
+    def opener(url, timeout=0):
+        if url.endswith("index.json"):
+            return FakeResponse(json.dumps([]).encode())
+        return Spy(package)
+
+    store = ModelStore(tmp_path, opener=opener)
+    store_ref["s"] = store
+    store.ensure("de", "en")
+    assert seen and all(s is not None for s in seen)
+    assert store.download_progress("de", "en") is None

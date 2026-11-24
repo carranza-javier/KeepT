@@ -50,6 +50,9 @@ class LanguagePrompt(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.theme = Theme(dark)
+        # A floating window over arbitrary content needs a more opaque background than the
+        # overlay pill (which always sits on the frozen, dimmed screenshot).
+        self.theme.bg.setAlpha(250)
         self.label = _Label(self.theme, i18n.tr("onboard_title"))
         lay = QHBoxLayout(self)
         m = SHADOW + 6
@@ -81,6 +84,7 @@ class LanguagePrompt(QWidget):
         self._fade.setDuration(260)
         self._fade.setStartValue(0.0)
         self._fade.setEndValue(1.0)
+        self._fade.finished.connect(lambda: self.setWindowOpacity(1.0))
         self._anim.start()
         self._fade.start()
 

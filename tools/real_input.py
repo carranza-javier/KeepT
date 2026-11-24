@@ -6,6 +6,7 @@ foreground window belongs to a KeepT process, so nothing lands in other apps.
     python tools/real_input.py hotkey
     python tools/real_input.py key Return|Escape|Space
     python tools/real_input.py click X Y            (physical virtual-screen coords)
+    python tools/real_input.py clickat X Y          (click a KeepT window that has no focus)
     python tools/real_input.py drag X1 Y1 X2 Y2 ... (polyline)
     python tools/real_input.py shot out.png [monitor index, 0 = all]
     python tools/real_input.py fg
@@ -107,6 +108,21 @@ def main():
         x, y = float(sys.argv[2]), float(sys.argv[3])
         move_abs(x, y)
         time.sleep(0.05)
+        move_abs(x, y, MOUSEEVENTF_LEFTDOWN)
+        time.sleep(0.05)
+        move_abs(x, y, MOUSEEVENTF_LEFTUP)
+    elif cmd == "clickat":
+        # For windows that never take focus: require the window under the cursor to be KeepT's.
+        x, y = float(sys.argv[2]), float(sys.argv[3])
+        move_abs(x, y)
+        time.sleep(0.1)
+        pt = wt.POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        user32.WindowFromPoint.restype = wt.HWND
+        hwnd = user32.GetAncestor(user32.WindowFromPoint(pt), 2)
+        if not _title(hwnd).startswith("KeepT"):
+            print("refused: window under cursor is not KeepT:", _title(hwnd))
+            raise SystemExit(2)
         move_abs(x, y, MOUSEEVENTF_LEFTDOWN)
         time.sleep(0.05)
         move_abs(x, y, MOUSEEVENTF_LEFTUP)

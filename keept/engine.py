@@ -41,6 +41,9 @@ class Engine(QObject):
         self.translator = translator or Translator()
         self._ocr_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-ocr")
         self._tr_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-translate")
+        # Downloads get their own thread so a long model download never blocks translating
+        # with the models that are already there.
+        self._dl_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-download")
         self._active = 0
         self._lock = threading.Lock()
 
@@ -152,9 +155,24 @@ class Engine(QObject):
         if tr.is_loaded(src, tgt):
             return
         pairs = route(src, tgt)
-        downloading = tr.needs_download(src, tgt)
+        store = tr.store
         for n, pair in enumerate(pairs):
-            if downloading:
+            if tr.is_pair_loaded(pair):
+                continue
+            if store.get(*pair) is None and store.download_progress(*pair) is not None:
+                # Already being downloaded in the background: show that progress and wait.
+                while store.get(*pair) is None and self._alive(session):
+                    state = store.download_progress(*pair)
+                    if state is None:
+                        if store.get(*pair) is None:
+                            raise ModelError("network", "background download failed")
+                        break
+                    done, total = state
+                    self.progress.emit(session, "download", (n + (done / total if total else 0.0)) / len(pairs))
+                    time.sleep(0.25)
+                if not self._alive(session):
+                    return
+            if store.get(*pair) is None:
                 def progress(done: int, total: int, n=n) -> None:
                     frac = (done / total) if total else 0.0
                     self.progress.emit(session, "download", (n + frac) / len(pairs))
@@ -166,34 +184,53 @@ class Engine(QObject):
                 tr.model(pair)
 
     # -- preload -------------------------------------------------------------------
-    def preload(self, tgt: str, download: bool) -> None:
-        """Load (and on first run download) the models needed to translate into `tgt`."""
-        self._tr_pool.submit(self._run_preload, tgt, download)
-
-    def _run_preload(self, tgt: str, download: bool) -> None:
-        t0 = time.perf_counter()
-        sources = [s for s in ("de", "en", "es") if s != tgt]
+    @staticmethod
+    def _pairs_for(tgt: str) -> list[tuple[str, str]]:
         pairs: list[tuple[str, str]] = []
-        for s in sources:
-            for p in route(s, tgt):
-                if p not in pairs:
-                    pairs.append(p)
-        store = self.translator.store
-        for n, pair in enumerate(pairs):
-            if store.get(*pair) is None and not download:
+        for s in ("de", "en", "es"):
+            if s != tgt:
+                for p in route(s, tgt):
+                    if p not in pairs:
+                        pairs.append(p)
+        return pairs
+
+    def preload(self, tgt: str, download: bool) -> None:
+        """Load the models needed to translate into `tgt`; with `download`, fetch the missing
+        ones first on the download thread (translations keep working meanwhile)."""
+        pairs = self._pairs_for(tgt)
+        self._tr_pool.submit(self._load_pairs, tgt, pairs)
+        if download:
+            missing = [p for p in pairs if self.translator.store.get(*p) is None]
+            if missing:
+                self._dl_pool.submit(self._download_pairs, tgt, missing)
+
+    def _load_pairs(self, tgt: str, pairs) -> None:
+        t0 = time.perf_counter()
+        for pair in pairs:
+            if self.translator.store.get(*pair) is None:
                 continue
             try:
-                def progress(done: int, total: int, n=n) -> None:
-                    frac = (done / total) if total else 0.0
-                    self.preload_status.emit(f"{pair[0]}>{pair[1]}", (n + frac) / len(pairs))
-
-                self.translator.model(pair, progress)
+                self.translator.model(pair)
             except Exception as exc:  # noqa: BLE001 - preload is best effort
                 log.warning("Preload of %s->%s failed: %s", *pair, exc)
-        self.preload_status.emit("", -1.0)
         log.info("Preload for target %s done in %.1fs", tgt, time.perf_counter() - t0)
+
+    def _download_pairs(self, tgt: str, pairs) -> None:
+        store = self.translator.store
+        for n, pair in enumerate(pairs):
+            def progress(done: int, total: int, n=n) -> None:
+                frac = (done / total) if total else 0.0
+                self.preload_status.emit(f"{pair[0]}>{pair[1]}", (n + frac) / len(pairs))
+
+            try:
+                store.ensure(pair[0], pair[1], progress)
+            except Exception as exc:  # noqa: BLE001 - retried on demand later
+                log.warning("Background download of %s->%s failed: %s", *pair, exc)
+        self.preload_status.emit("", -1.0)
+        self._tr_pool.submit(self._load_pairs, tgt, pairs)
 
     def shutdown(self) -> None:
         self.set_active(-1)
         self._ocr_pool.shutdown(wait=False, cancel_futures=True)
         self._tr_pool.shutdown(wait=False, cancel_futures=True)
+        self._dl_pool.shutdown(wait=False, cancel_futures=True)

@@ -76,6 +76,7 @@ class ModelStore:
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._open = opener or self._urlopen
+        self._progress: dict[tuple[str, str], tuple[int, int]] = {}
 
     @staticmethod
     def _urlopen(url: str, timeout: float = 20.0):
@@ -105,6 +106,10 @@ class ModelStore:
 
     def delete(self, src: str, tgt: str) -> None:
         shutil.rmtree(self.pair_dir(src, tgt), ignore_errors=True)
+
+    def download_progress(self, src: str, tgt: str) -> tuple[int, int] | None:
+        """(done, total) bytes while this pair is being downloaded, else None."""
+        return self._progress.get((src, tgt))
 
     def _lock(self, pair: tuple[str, str]) -> threading.Lock:
         with self._locks_guard:
@@ -145,7 +150,17 @@ class ModelStore:
             existing = self.get(src, tgt)
             if existing:
                 return existing
-            return self._download_and_install(src, tgt, progress)
+            self._progress[(src, tgt)] = (0, 0)
+
+            def track(done: int, total: int) -> None:
+                self._progress[(src, tgt)] = (done, total)
+                if progress:
+                    progress(done, total)
+
+            try:
+                return self._download_and_install(src, tgt, track)
+            finally:
+                self._progress.pop((src, tgt), None)
 
     def _download_and_install(self, src: str, tgt: str, progress: Progress | None) -> InstalledModel:
         marian = (src, tgt) in MARIAN_MODELS
