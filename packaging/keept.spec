@@ -10,7 +10,8 @@ ROOT = Path(SPECPATH).parent
 hiddenimports = (
     collect_submodules("winrt")
     + collect_submodules("keept")
-    + ["sacremoses", "subword_nmt.apply_bpe", "sentencepiece", "ctranslate2"]
+    + ["sacremoses", "subword_nmt.apply_bpe", "sentencepiece", "ctranslate2",
+       "ctranslate2.converters.opus_mt", "ctranslate2.converters.marian", "yaml"]
 )
 
 datas = collect_data_files("sacremoses") + collect_data_files("ctranslate2")

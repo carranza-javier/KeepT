@@ -1,3 +1,4 @@
+from pathlib import Path
 import io
 import json
 import zipfile
@@ -36,8 +37,10 @@ def translator(tmp_path):
 def test_route_direct_and_pivot():
     assert route("de", "en") == [("de", "en")]
     assert route("es", "en") == [("es", "en")]
-    assert route("de", "es") == [("de", "en"), ("en", "es")]
-    assert route("es", "de") == [("es", "en"), ("en", "de")]
+    assert route("de", "es") == [("de", "es")]  # direct OPUS-MT model
+    assert route("es", "de") == [("es", "de")]
+    argos_only = {("de", "en"), ("en", "de"), ("en", "es"), ("es", "en")}
+    assert route("de", "es", argos_only) == [("de", "en"), ("en", "es")]
     assert route("en", "en") == []
 
 
@@ -46,7 +49,11 @@ def test_split_sentences():
         "No se pudo guardar el archivo.",
         "Inténtalo de nuevo.",
     ]
-    assert split_sentences("Siehe z.B. Seite 3. Danach weiter.") == ["Siehe z.B. Seite 3.", "Danach weiter."]
+    assert split_sentences("Siehe z.B. Seite 30. Danach weiter.") == ["Siehe z.B. Seite 30. Danach weiter."]
+    assert split_sentences("Geschlossen vom 24. Dezember bis 2. Januar. Danke!") == [
+        "Geschlossen vom 24. Dezember bis 2. Januar.", "Danke!"]
+    assert split_sentences("Ich bin vom 3. bis 14. Juli weg.") == ["Ich bin vom 3. bis 14. Juli weg."]
+    assert split_sentences("Das kostet 120. Danach mehr.") == ["Das kostet 120.", "Danach mehr."]
     assert split_sentences("Version 2.5 is out! ¿Qué tal? Bien.") == ["Version 2.5 is out!", "¿Qué tal?", "Bien."]
     assert split_sentences("  ") == []
 
@@ -56,10 +63,18 @@ def test_translate_direct(translator):
     assert out == ["[de>en]Hallo Welt. [de>en]Wie geht's?"]
 
 
-def test_translate_pivot_through_english(translator):
+def test_translate_pivot_through_english(translator, monkeypatch):
+    from keept.translate import translator as tmod
+
+    argos_only = frozenset({("de", "en"), ("en", "de"), ("en", "es"), ("es", "en")})
+    monkeypatch.setattr(tmod.route, "__defaults__", (argos_only,))
     out = translator.translate(["Hallo."], "de", "es")
     assert out == ["[en>es][de>en]Hallo."]
     assert set(translator.loaded) == {("de", "en"), ("en", "es")}
+
+
+def test_translate_direct_german_spanish(translator):
+    assert translator.translate(["Hallo."], "de", "es") == ["[de>es]Hallo."]
 
 
 def test_batches_all_sentences_in_one_call(translator):
@@ -177,3 +192,29 @@ def test_network_error_is_reported_as_network(tmp_path):
     with pytest.raises(ModelError) as err:
         ModelStore(tmp_path, opener=opener).ensure("de", "en")
     assert err.value.kind == "network"
+
+
+def test_store_installs_marian_package_with_local_conversion(tmp_path, monkeypatch):
+    import ctranslate2.converters.opus_mt as opus_mt
+
+    class FakeConverter:
+        def __init__(self, src_dir):
+            self.src = Path(src_dir)
+            assert (self.src / "decoder.yml").exists() and (self.src / "model.npz").exists()
+
+        def convert(self, out, quantization, force):
+            assert quantization == "int8"
+            Path(out).mkdir(parents=True)
+            (Path(out) / "model.bin").write_bytes(b"ct2")
+
+    monkeypatch.setattr(opus_mt, "OpusMTConverter", FakeConverter)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name in ("decoder.yml", "model.npz", "x.vocab.yml", "source.spm", "target.spm", "LICENSE", "train.log"):
+            zf.writestr(name, b"data")
+    store = ModelStore(tmp_path, opener=fake_opener(buf.getvalue()))
+    info = store.ensure("de", "es")
+    assert info.tokenizer == "marian" and info.version.startswith("tc-big")
+    assert (info.path / "model" / "model.bin").read_bytes() == b"ct2"
+    assert (info.path / "source.spm").exists() and (info.path / "LICENSE").exists()
+    assert not (info.path / "marian").exists() and not (info.path / "train.log").exists()

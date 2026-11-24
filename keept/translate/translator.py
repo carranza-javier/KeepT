@@ -31,6 +31,9 @@ def split_sentences(text: str) -> list[str]:
         last_word = candidate.rsplit(" ", 1)[-1].rstrip(".").lower()
         if candidate.endswith(".") and (last_word in _ABBREV or (len(last_word) == 1 and last_word.isalpha())):
             continue
+        # German ordinals ("am 24. Dezember", "vom 3. bis 14. Juli") are not sentence ends.
+        if candidate.endswith(".") and last_word.isdigit() and len(last_word) <= 2:
+            continue
         parts.append(candidate)
         start = m.end()
     parts.append(text[start:])

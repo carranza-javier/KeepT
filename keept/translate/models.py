@@ -32,7 +32,16 @@ FALLBACK_LINKS = {
     ("en", "es"): "https://argos-net.com/v1/translate-en_es-1_0.argosmodel",
     ("es", "en"): "https://argos-net.com/v1/translate-es_en-1_9.argosmodel",
 }
-KNOWN_PAIRS = frozenset(FALLBACK_LINKS)
+# Direct German <-> Spanish: OPUS-MT Tatoeba transformer-big (CC-BY 4.0, University of Helsinki),
+# downloaded from the official OPUS-MT storage and converted locally to CTranslate2 int8
+# (better than the pivot through English in our benchmark, see DECISIONS.md).
+MARIAN_MODELS = {
+    ("de", "es"): ("https://object.pouta.csc.fi/Tatoeba-MT-models/deu-spa/"
+                   "opusTCv20210807_transformer-big_2022-07-26.zip", "tc-big-2022-07-26"),
+    ("es", "de"): ("https://object.pouta.csc.fi/Tatoeba-MT-models/spa-deu/"
+                   "opusTCv20210807_transformer-big_2022-07-22.zip", "tc-big-2022-07-22"),
+}
+KNOWN_PAIRS = frozenset(FALLBACK_LINKS) | frozenset(MARIAN_MODELS)
 USER_AGENT = "KeepT-model-downloader"
 MARKER = "keept.json"
 
@@ -53,7 +62,7 @@ class InstalledModel:
     tgt: str
     path: Path
     version: str
-    tokenizer: str  # "spm" or "bpe"
+    tokenizer: str  # "spm", "bpe" or "marian"
     size_bytes: int
 
 
@@ -139,7 +148,8 @@ class ModelStore:
             return self._download_and_install(src, tgt, progress)
 
     def _download_and_install(self, src: str, tgt: str, progress: Progress | None) -> InstalledModel:
-        url, version = self.resolve_link(src, tgt)
+        marian = (src, tgt) in MARIAN_MODELS
+        url, version = MARIAN_MODELS[(src, tgt)] if marian else self.resolve_link(src, tgt)
         try:
             self.root.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -151,6 +161,8 @@ class ModelStore:
         try:
             self._fetch(url, tmp_zip, progress)
             log.info("Downloaded %s in %.1fs", url, time.perf_counter() - t0)
+            if marian:
+                return self._install_marian(tmp_zip, src, tgt, version)
             return self._install_zip(tmp_zip, src, tgt, version)
         finally:
             tmp_zip.unlink(missing_ok=True)
@@ -234,6 +246,55 @@ class ModelStore:
         return model
 
 
+    def _install_marian(self, zip_path: Path, src: str, tgt: str, version: str) -> InstalledModel:
+        """Extract an OPUS-MT Marian package and convert it to CTranslate2 int8."""
+        final = self.pair_dir(src, tgt)
+        staging = Path(tempfile.mkdtemp(prefix=f".{src}_{tgt}-", dir=self.root))
+        raw = staging / "marian"
+        try:
+            try:
+                zf = zipfile.ZipFile(zip_path)
+            except zipfile.BadZipFile as exc:
+                raise ModelError("corrupt", "downloaded file is not a valid model package") from exc
+            with zf:
+                keep = [n for n in zf.namelist() if "/" not in n and (
+                    n.endswith((".npz", ".spm", "decoder.yml", ".vocab.yml")) or n in ("LICENSE", "README.md"))]
+                if not any(n.endswith(".npz") for n in keep) or "decoder.yml" not in keep:
+                    raise ModelError("corrupt", "not an OPUS-MT package")
+                raw.mkdir()
+                for name in keep:
+                    with zf.open(name) as fsrc, open(raw / name, "wb") as fdst:
+                        shutil.copyfileobj(fsrc, fdst, 1 << 20)
+            t0 = time.perf_counter()
+            try:
+                from ctranslate2.converters.opus_mt import OpusMTConverter
+
+                OpusMTConverter(str(raw)).convert(str(staging / "model"), quantization="int8", force=True)
+            except Exception as exc:  # noqa: BLE001
+                raise ModelError("corrupt", f"conversion failed: {exc}") from exc
+            log.info("Converted %s->%s to CTranslate2 int8 in %.1fs", src, tgt, time.perf_counter() - t0)
+            for name in ("source.spm", "target.spm", "LICENSE", "README.md"):
+                if (raw / name).exists():
+                    shutil.copy(raw / name, staging / name)
+            shutil.rmtree(raw, ignore_errors=True)
+            size = _dir_size(staging)
+            (staging / MARKER).write_text(
+                json.dumps({"src": src, "tgt": tgt, "version": version, "tokenizer": "marian", "size": size}),
+                encoding="utf-8",
+            )
+            if final.exists():
+                shutil.rmtree(final, ignore_errors=True)
+            staging.rename(final)
+        except OSError as exc:
+            raise ModelError("disk", str(exc)) from exc
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+        model = self.get(src, tgt)
+        assert model is not None
+        return model
+
+
 # -- loading -------------------------------------------------------------------
 class SentencePieceTokenizer:
     def __init__(self, path: Path):
@@ -269,6 +330,23 @@ class BPETokenizer:
         return self._detok.detokenize(" ".join(tokens).replace("@@ ", "").split(" "))
 
 
+class MarianTokenizer:
+    """OPUS-MT: separate SentencePiece models for source and target. The converted model
+    configuration appends the end of sentence token to the source itself."""
+
+    def __init__(self, source: Path, target: Path):
+        import sentencepiece as spm
+
+        self._src = spm.SentencePieceProcessor(model_file=str(source))
+        self._tgt = spm.SentencePieceProcessor(model_file=str(target))
+
+    def encode(self, text: str) -> list[str]:
+        return self._src.encode(text, out_type=str)
+
+    def decode(self, tokens: list[str]) -> str:
+        return self._tgt.decode([t for t in tokens if t != "</s>"])
+
+
 class LoadedModel:
     def __init__(self, info: InstalledModel, threads: int):
         import ctranslate2
@@ -278,7 +356,9 @@ class LoadedModel:
         self.translator = ctranslate2.Translator(
             str(info.path / "model"), device="cpu", compute_type="int8", inter_threads=1, intra_threads=threads
         )
-        if info.tokenizer == "bpe":
+        if info.tokenizer == "marian":
+            self.tokenizer = MarianTokenizer(info.path / "source.spm", info.path / "target.spm")
+        elif info.tokenizer == "bpe":
             self.tokenizer = BPETokenizer(info.path / "bpe.model", info.src, info.tgt)
         else:
             self.tokenizer = SentencePieceTokenizer(info.path / "sentencepiece.model")
@@ -295,5 +375,6 @@ class LoadedModel:
             max_batch_size=32,
             max_decoding_length=min(512, int(longest * 2.5) + 16),
             repetition_penalty=1.05,
+            disable_unk=True,  # never print the unknown token marker for characters outside the vocabulary
         )
         return [self.tokenizer.decode(r.hypotheses[0]) for r in results]

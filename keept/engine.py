@@ -119,8 +119,8 @@ class Engine(QObject):
                 log.exception("Could not load models %s->%s", src, tgt)
                 self.translation_failed.emit(session, "translate", [j.key for j in group])
                 continue
-            # Small first chunk so something appears quickly, then bigger chunks for throughput.
-            i, size = 0, 2
+            # One block first so something appears quickly, then bigger chunks for throughput.
+            i, size = 0, 1
             while i < len(group):
                 if not self._alive(session):
                     return
