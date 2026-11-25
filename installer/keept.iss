@@ -1,4 +1,4 @@
-; Inno Setup script for KeepT (per user install, no administrator rights needed).
+﻿; Inno Setup script for KeepT (per user install, no administrator rights needed).
 ;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\keept.iss
 
 #define AppName "KeepT"
@@ -12,13 +12,16 @@
 AppId={{6F2B7C1E-4B1A-4E8B-9C55-6B1E2A0D7A11}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=KeepT
-AppPublisherURL=https://github.com/carranza-javier/KeepT
+AppPublisher=KettenKI (Javier Carranza)
+AppPublisherURL=https://kettenki.com
+AppCopyright=© 2026 Javier Carranza
 AppSupportURL=https://github.com/carranza-javier/KeepT/issues
 VersionInfoVersion={#AppVersion}
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
 VersionInfoDescription=KeepT screen translator installer
+VersionInfoCompany=KettenKI
+VersionInfoCopyright=© 2026 Javier Carranza
 ; Privacy notice shown before installing (what KeepT sends over the network and how to turn it off)
 InfoBeforeFile=..\packaging\privacy.txt
 DefaultDirName={localappdata}\Programs\{#AppName}

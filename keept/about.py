@@ -6,6 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout
 
 from . import __version__, credits, i18n
+
+AUTHOR_URL = "https://kettenki.com"
 from .icon import app_icon
 from .paths import licenses_dir
 from .platform import services
@@ -20,8 +22,10 @@ class AboutDialog(QDialog):
         head = QHBoxLayout()
         logo = QLabel()
         logo.setPixmap(app_icon().pixmap(48, 48))
-        title = QLabel(f"<b style='font-size:16pt'>KeepT</b> {__version__}<br>{i18n.tr('about_intro')}")
+        title = QLabel(f"<b style='font-size:16pt'>KeepT</b> {__version__}<br>{i18n.tr('about_intro')}<br>"
+                       f"© 2026 Javier Carranza · <a href='{AUTHOR_URL}'>KettenKI</a>")
         title.setWordWrap(True)
+        title.setOpenExternalLinks(True)
         head.addWidget(logo)
         head.addWidget(title, 1)
         lay.addLayout(head)

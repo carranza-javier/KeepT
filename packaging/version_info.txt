@@ -13,10 +13,11 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         u'040904B0',
-        [StringStruct(u'CompanyName', u'KeepT'),
+        [StringStruct(u'CompanyName', u'KettenKI'),
          StringStruct(u'FileDescription', u'KeepT screen translator'),
          StringStruct(u'FileVersion', u'VERSION_TEXT'),
          StringStruct(u'InternalName', u'KeepT'),
+         StringStruct(u'LegalCopyright', u'© 2026 Javier Carranza'),
          StringStruct(u'OriginalFilename', u'KeepT.exe'),
          StringStruct(u'ProductName', u'KeepT'),
          StringStruct(u'ProductVersion', u'VERSION_TEXT')])
