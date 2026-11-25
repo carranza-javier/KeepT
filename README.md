@@ -11,7 +11,7 @@ Made by Javier Carranza · [KettenKI](https://kettenki.com)
 **[Download KeepT for Windows](https://github.com/carranza-javier/KeepT/releases)**: take `KeepT-Setup-x.y.z.exe` from the newest release (about 50 MB, Windows 10 or 11, 64-bit). KeepT is not stable yet, so 0.x versions are published as pre-releases.
 
 - The installer works per user, so no administrator rights are needed, and it can start KeepT with Windows.
-- Every release lists the SHA-256 of the installer. To check it in PowerShell, run `Get-FileHash .\KeepT-Setup-0.9.0.exe -Algorithm SHA256`.
+- Every release lists the SHA-256 of the installer. To check it in PowerShell, run `Get-FileHash .\KeepT-Setup-0.9.1.exe -Algorithm SHA256`.
 - **Windows SmartScreen:** the installer is not signed yet (see [Code signing policy](#code-signing-policy)), so Windows may show "Windows protected your PC". Click **More info** and then **Run anyway**. The installer is built by GitHub Actions from this repository, and you can compare its SHA-256 with the one in the release.
 - To uninstall, use Settings > Apps. Downloaded models and settings are removed too.
 

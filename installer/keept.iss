@@ -4,7 +4,7 @@
 #define AppName "KeepT"
 ; The release workflow passes the version of the tag: ISCC /DAppVersion=X.Y.Z
 #ifndef AppVersion
-  #define AppVersion "0.9.0"
+  #define AppVersion "0.9.1"
 #endif
 #define AppExe "KeepT.exe"
 
