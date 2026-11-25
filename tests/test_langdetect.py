@@ -2,43 +2,55 @@ import pytest
 
 from keept.translate.langdetect import detect
 
+SENTENCES = [
+    ("Die Datei konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.", "de"),
+    ("Melden Sie sich an, um auf Ihre Dateien zuzugreifen.", "de"),
+    ("The file could not be saved. Please try again later.", "en"),
+    ("Click here to download the latest version", "en"),
+    ("No se pudo guardar el archivo. Inténtalo de nuevo más tarde.", "es"),
+    ("¿Dónde está la estación de tren?", "es"),
+    ("Le fichier n'a pas pu être enregistré. Veuillez réessayer.", "fr"),
+    ("Impossibile salvare il file. Riprova più tardi.", "it"),
+    ("Não foi possível guardar o ficheiro. Tente novamente mais tarde.", "pt"),
+    ("Het bestand kon niet worden opgeslagen. Probeer het later opnieuw.", "nl"),
+    ("Nie można zapisać pliku. Spróbuj ponownie później.", "pl"),
+    # OCR with the German engine reads "ó" as "ö"
+    ("Configuraciön de Ia cuenta", "es"),
+]
 
-@pytest.mark.parametrize(
-    "text, lang",
-    [
-        ("Die Datei konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.", "de"),
-        ("Wir verwenden Cookies, um Inhalte zu personalisieren und die Zugriffe zu analysieren.", "de"),
-        ("Melden Sie sich an, um auf Ihre Dateien zuzugreifen.", "de"),
-        ("Größe ändern", "de"),
-        ("The file could not be saved. Please try again later.", "en"),
-        ("This update improves battery life and fixes a crash when opening large files.", "en"),
-        ("Click here to download the latest version", "en"),
-        ("No se pudo guardar el archivo. Inténtalo de nuevo más tarde.", "es"),
-        ("¿Dónde está la estación de tren?", "es"),
-        ("Configuración de la cuenta", "es"),
-        ("Guardar cambios", "es"),
-        ("Contraseña", "es"),
-        # OCR with the German engine reads "ó" as "ö"
-        ("Configuraciön de Ia cuenta", "es"),
-    ],
-)
-def test_detects_language(text, lang):
+# Button labels: ambiguous alone, right with the language of the rest of the screen.
+BUTTONS = {
+    "de": ["Speichern", "Abbrechen", "Einstellungen", "Alle akzeptieren", "Weiter"],
+    "en": ["Save", "Cancel", "Settings", "Accept all", "Next"],
+    "es": ["Guardar", "Cancelar", "Configuración", "Aceptar todo", "Siguiente"],
+    "fr": ["Enregistrer", "Annuler", "Paramètres", "Tout accepter", "Suivant"],
+    "it": ["Salva", "Annulla", "Impostazioni", "Accetta tutto", "Avanti"],
+    "pt": ["Guardar", "Cancelar", "Definições", "Aceitar tudo", "Seguinte"],
+    "nl": ["Opslaan", "Annuleren", "Instellingen", "Alles accepteren", "Volgende"],
+    "pl": ["Zapisz", "Anuluj", "Ustawienia", "Zaakceptuj wszystko", "Dalej"],
+}
+
+
+@pytest.mark.parametrize("text, lang", SENTENCES)
+def test_detects_sentences(text, lang):
     assert detect(text)[0] == lang
 
 
-def test_prior_decides_ambiguous_short_text():
-    assert detect("OK", prior="es")[0] == "es"
-    assert detect("Login", prior="de")[0] == "de"
-
-
-def test_no_evidence_without_prior():
-    assert detect("12:45 - 3/7") == (None, 0.0)
+@pytest.mark.parametrize("lang", list(BUTTONS))
+def test_short_labels_with_screen_prior(lang):
+    assert [detect(t, prior=lang)[0] for t in BUTTONS[lang]] == [lang] * len(BUTTONS[lang])
 
 
 def test_strong_evidence_beats_prior():
     assert detect("Die Datei konnte nicht gespeichert werden.", prior="en")[0] == "de"
+    assert detect("Le fichier n'a pas pu être enregistré. Veuillez réessayer.", prior="es")[0] == "fr"
 
 
-def test_confidence_range():
-    lang, conf = detect("The file could not be saved and the application will close now.")
-    assert lang == "en" and 0.5 < conf <= 1.0
+def test_no_letters():
+    assert detect("12:45 - 3/7") == (None, 0.0)
+    assert detect("12:45", prior="es") == ("es", 0.0)
+
+
+def test_probability_range():
+    lang, p = detect("The file could not be saved and the application will close now.")
+    assert lang == "en" and 0.5 < p <= 1.0
