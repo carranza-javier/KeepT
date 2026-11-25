@@ -1,44 +1,99 @@
 # KeepT
 
-Translate any text on your Windows screen with one shortcut. KeepT freezes the
-screen, reads the text locally and paints the translation right on top of the
-original, in the same place and with the same colours, like a lens.
+**Translate any text on your Windows screen with one shortcut.** KeepT freezes the screen,
+reads the text locally and paints the translation right on top of the original, in the same
+place, with the same colours and size, like a lens. No windows to copy text into, no accounts,
+no API keys, and nothing leaves your PC.
 
-- **One click**: press `Ctrl+Alt+T`, then click a paragraph, circle some text, drag a rectangle, or press `Enter` for the whole screen.
-- **Local**: OCR uses the built in Windows engine and translation runs on your CPU (CTranslate2 with OPUS-MT models). Screenshots never leave your PC. The only network access is downloading a language model the first time it is needed.
-- **Zero setup**: no accounts, no API keys. Lives in the system tray.
-- **Languages**: German, English, Spanish, French, Italian, Portuguese, Dutch and Polish, in any direction. Direct models where OPUS-MT has one, otherwise through English. No model ships with KeepT: each one is downloaded the first time it is needed (when you pick a target language or translate text in a new language).
+![KeepT: press the shortcut, circle a paragraph, the translation appears in place](docs/keept-demo.gif)
 
-## Using it
+## Download
+
+**[Download the latest KeepT for Windows](https://github.com/carranza-javier/KeepT/releases/latest)**
+(`KeepT-Setup-x.y.z.exe`, about 50 MB, Windows 10 or 11, 64-bit).
+
+- The installer is per user: no administrator rights are needed. It can start KeepT with Windows.
+- Every release lists the SHA-256 of the installer. To check it in PowerShell:
+  `Get-FileHash .\KeepT-Setup-1.0.0.exe -Algorithm SHA256`
+- **Windows SmartScreen:** until the code signing certificate is approved (see
+  [Code signing policy](#code-signing-policy)), the installer is not signed and Windows may show
+  "Windows protected your PC". Click **More info** and then **Run anyway**. The installer is built
+  by GitHub Actions from this repository, and you can compare its SHA-256 with the one in the release.
+- Uninstall from Settings > Apps. Downloaded models and settings are removed too.
+
+## How to use
+
+On the first start KeepT asks which language to translate into (you can change it any time).
+Then press **`Ctrl+Alt+T`**: the monitor under the mouse freezes with a glowing border and the
+text is read in the background.
 
 | Action | Result |
 | --- | --- |
-| `Ctrl+Alt+T` | Freeze the monitor under the mouse. Press again or `Esc` to close. |
-| Click a text block | Translate that block |
-| Circle text / drag a diagonal | Translate what is inside the lasso or rectangle |
+| Click or tap a text block | Translate that block |
+| Drag with the mouse | Translate what is inside the rectangle |
+| Draw around text with a finger or a pen | Translate what is inside the lasso |
 | `Enter` or "Translate screen" | Translate everything |
 | Click a translated block | Copy it |
-| Hold `Space` | Peek at the original |
+| Hold `Space`, or "Original" | Peek at the original |
 | `Ctrl+C` or "Copy" | Copy all visible translations |
-| Click outside the text | Close |
+| Language button in the pill | Change the target language |
+| `Esc`, right click, or click outside the text | Close |
 
-The tray menu sets the target language (asked once on first run), the shortcut
-(default `Ctrl+Alt+T`; KeepT warns if another app already uses a combination),
-start with Windows, lets you delete downloaded models and shows the credits.
+The tray icon menu has the target language, the shortcut (KeepT warns if another app already
+uses it), start with Windows, the update check, the downloaded models and the credits.
 
-Models are released after 10 minutes without using KeepT (about 80 MB of RAM in Task
-Manager instead of about 410 MB) and reloaded in the background as soon as the shortcut is
-pressed, while the screen is being read.
+## Languages
 
-Models are stored in `%LOCALAPPDATA%\KeepT\models`, settings in
-`%APPDATA%\KeepT\config.json` and the log in `%LOCALAPPDATA%\KeepT\keept.log`.
-Set `"low_memory": true` in the config to disable MKL weight pre-packing in
-CTranslate2 (committed memory drops from 2-3 GB to about 0.6 GB, about 20 % slower;
-the RAM shown in Task Manager is about 400 MB either way).
+German, English, Spanish, French, Italian, Portuguese, Dutch and Polish, in any direction.
+KeepT uses a direct OPUS-MT model where one exists and goes through English otherwise.
 
-If Windows lacks the OCR pack for a language, KeepT tells you once from the tray.
-It can be added in Settings > Time & language > Language, or as administrator:
-`Add-WindowsCapability -Online -Name "Language.OCR~~~de-DE~0.0.1.0"`.
+No model ships with KeepT. Each one (about 80 to 250 MB) is downloaded the first time it is
+needed: when you pick a target language, or the first time you translate text in a new
+language. Models are kept in `%LOCALAPPDATA%\KeepT\models` and can be deleted from the tray.
+After 10 minutes without use KeepT frees them from memory and reloads them in the background
+as soon as you press the shortcut.
+
+Text recognition uses the OCR built into Windows. If the OCR pack for a language is missing,
+KeepT tells you how to add it (Settings > Time & language > Language).
+
+## Privacy
+
+Everything happens on your computer: screen captures, recognized text and translations never
+leave it. There are no accounts and no telemetry. KeepT only connects to the internet to:
+
+1. **Download translation models**, the first time a language pair is needed, from the
+   [models-v1 release](https://github.com/carranza-javier/KeepT/releases/tag/models-v1) of this
+   repository. Each file is verified with the SHA-256 pinned in the app and discarded if it does
+   not match. Only if GitHub cannot be reached is the original model downloaded from the official
+   OPUS-MT servers of the University of Helsinki and converted on your PC.
+2. **Check for a new version**, at most once a day, by reading the latest release from the public
+   GitHub API. Nothing about you or your screen is sent. KeepT only shows a notice with a link and
+   never installs anything by itself. You can turn this off in the installer or in the tray menu.
+
+GitHub and the University of Helsinki may log these requests (for example your IP address)
+according to their own privacy policies.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+KeepT has applied for free code signing for open source projects. Until it is approved,
+releases are published unsigned (see the SmartScreen note above).
+
+- **What is signed:** only `KeepT.exe` and the `KeepT-Setup-x.y.z.exe` installer produced by the
+  [Release workflow](.github/workflows/release.yml) of this repository, on GitHub-hosted
+  runners, from a version tag. Nothing built on a personal computer is ever signed.
+- **Team roles:**
+  - Committers and reviewers: [carranza-javier](https://github.com/carranza-javier), author and
+    maintainer. Changes proposed by anyone else are reviewed before they are merged.
+  - Approvers: [carranza-javier](https://github.com/carranza-javier). Every signing request is
+    approved manually.
+- **Privacy policy:** see [Privacy](#privacy). KeepT transfers no information about the user or
+  the screen. Its only network requests are the model downloads and the optional update check
+  described there, which are also explained (and can be turned off) during installation.
+- Third party components keep their own licenses, are listed in
+  [Credits and licenses](#credits-and-licenses) and are included unsigned.
 
 ## Development
 
@@ -58,8 +113,23 @@ Useful tools (they work without touching the real mouse or keyboard):
 - `tools/ocr_dump.py IMAGE`: print the text blocks and languages KeepT detects.
 - `python -m keept --selftest IMAGE|screen --target es`: run OCR and translation once and report timings (also works with the packaged `KeepT.exe`).
 - `python -m keept --fake-capture IMAGE --debug-blocks`: use an image instead of the screen and outline OCR blocks.
+- `tools/record_demo.py` and `tools/make_gif.py`: record the README animation from the synthetic screen.
 
-## Building
+## Releases and models
+
+- **App releases** are built only by GitHub Actions. Pushing a tag `vX.Y.Z` that matches
+  `keept/__init__.py` runs the tests, builds `KeepT.exe` with PyInstaller and the installer with
+  Inno Setup on a Windows runner, and publishes them with their SHA-256 in a GitHub Release. The
+  SignPath signing steps are in the same workflow and stay off until the repository variable
+  `SIGNPATH_ENABLED` is `true`.
+- **Translation models** live in the `models-v1` release. After changing
+  `keept/translate/catalog.json` (built by `tools/build_model_catalog.py`), run the
+  "Translation models" workflow from the Actions tab: `tools/publish_models.py` downloads the
+  OPUS-MT originals, converts them to CTranslate2 int8 and uploads them with a `manifest.json`
+  (size and SHA-256). Commit the resulting `keept/translate/models_manifest.json` so the app pins
+  the new hashes.
+
+To build locally for testing (local builds are never signed or published):
 
 ```powershell
 .venv\Scripts\python tools\make_icon.py packaging\keept.ico
@@ -67,19 +137,17 @@ Useful tools (they work without touching the real mouse or keyboard):
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" installer\keept.iss
 ```
 
-The installer (`installer\Output\KeepT-Setup-1.0.0.exe`) installs per user,
-without administrator rights, and can start KeepT with Windows.
-
 ## Layout
 
 ```
 keept/
   app.py            entry point: tray, hotkey, per monitor overlays, preload, selftest
   engine.py         OCR and translation on worker threads, results as Qt signals
+  updates.py        daily check for a newer GitHub release
   platform/         Windows specifics (hotkey, DPI, DWM cloaking, autostart) behind an interface
   capture.py        monitor capture with mss
   ocr/              Windows.Media.Ocr wrapper, block grouping, per block language re-read
-  translate/        language detection, OPUS-MT catalog and model store, CTranslate2 translator with pivot
+  translate/        language detection, OPUS-MT catalog, model store and translator with pivot
   overlay/          overlay window, effects, pill, selection, rendering helpers
 ```
 
@@ -96,9 +164,10 @@ Translation models
   "OPUS-MT: Building open translation services for the World", EAMT 2020, and
   "The Tatoeba Translation Challenge", WMT 2020.
   License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-  Modified: downloaded on demand from the official OPUS-MT storage and converted locally to
-  CTranslate2 (int8). The model used for each pair is listed in `keept/translate/catalog.json`
-  (built by `tools/build_model_catalog.py`).
+  Modified: converted to CTranslate2 (int8) and published in the
+  [models-v1 release](https://github.com/carranza-javier/KeepT/releases/tag/models-v1) with the
+  original LICENSE and README and a NOTICE describing the conversion. The model used for each
+  pair is listed in `keept/translate/catalog.json` (built by `tools/build_model_catalog.py`).
 
 Libraries bundled in the Windows build
 
