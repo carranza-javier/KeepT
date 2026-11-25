@@ -443,6 +443,7 @@ class OverlayWindow(QWidget):
         self.pill.set_mode("result")
         self.state = State.TRANSLATING
         jobs = [TranslationJob(it.key, it.block.text, it.block.lang or self.screen_lang or "en") for it in todo]
+        self._t_request = time.perf_counter()
         self.engine.translate(self.session, jobs, tgt)
 
     def _fit(self, item: Item) -> FitResult:
@@ -496,6 +497,10 @@ class OverlayWindow(QWidget):
             return
         item.status = "done"
         item.t_done = self.now()
+        if getattr(self, "_t_request", None):
+            log.info("First block on screen %.0f ms after the translation request (%.0f ms after hotkey)",
+                     (time.perf_counter() - self._t_request) * 1000, (time.perf_counter() - self._t_hotkey) * 1000)
+            self._t_request = None
         if self.pill.mode() == "progress":
             self.pill.end_message()
 
