@@ -1,9 +1,15 @@
-"""OPUS-MT translation models: catalog, on demand download, local conversion and loading.
+"""OPUS-MT translation models: catalog, on demand download, verification and loading.
 
 Every language pair uses an OPUS-MT model (University of Helsinki, CC BY 4.0) listed in
 catalog.json (built by tools/build_model_catalog.py from the official OPUS-MT storage).
-Nothing is bundled: a model is downloaded the first time a pair is needed, converted on the
-user's machine to CTranslate2 int8 and kept in %LOCALAPPDATA%\\KeepT\\models.
+Nothing is bundled: a model is downloaded the first time a pair is needed and kept in
+%LOCALAPPDATA%\\KeepT\\models.
+
+Source: the models, already converted to CTranslate2 int8, are assets of the KeepT GitHub
+release listed in models_manifest.json (published by tools/publish_models.py). The SHA-256 of
+every file is pinned in that manifest, which ships with the app: a file that does not match is
+discarded. Only when GitHub cannot be reached does KeepT fall back to the official OPUS-MT
+storage and convert the original Marian model locally.
 
 Text goes through the same steps as in the OPUS-MT training pipeline (preprocess.sh):
 Moses punctuation normalisation, then SentencePiece; output is decoded with SentencePiece.
@@ -33,6 +39,17 @@ CATALOG: dict[tuple[str, str], dict] = {
     tuple(k.split("-")): v for k, v in json.loads(CATALOG_FILE.read_text(encoding="utf-8")).items()
 }
 KNOWN_PAIRS = frozenset(CATALOG)
+MANIFEST_FILE = Path(__file__).with_name("models_manifest.json")
+
+
+def _load_manifest() -> dict:
+    try:
+        return json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"base_url": "", "models": {}}
+
+
+MANIFEST = _load_manifest()
 USER_AGENT = "KeepT-model-downloader"
 MARKER = "keept.json"
 
@@ -61,9 +78,11 @@ def _dir_size(path: Path) -> int:
 
 
 class ModelStore:
-    def __init__(self, root: Path | None = None, opener=None, catalog: dict | None = None):
+    def __init__(self, root: Path | None = None, opener=None, catalog: dict | None = None,
+                 manifest: dict | None = None):
         self.root = Path(root) if root else models_dir()
         self.catalog = CATALOG if catalog is None else catalog
+        self.manifest = (MANIFEST if catalog is None else {"base_url": "", "models": {}}) if manifest is None else manifest
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._open = opener or self._urlopen
@@ -144,15 +163,71 @@ class ModelStore:
         os.close(fd)
         tmp_zip = Path(tmp_name)
         try:
+            entry = self.manifest.get("models", {}).get(f"{src}-{tgt}")
+            if entry and entry.get("opus_url") == spec["url"]:
+                url = self.manifest["base_url"] + entry["file"]
+                try:
+                    digest = self._fetch(url, tmp_zip, progress)
+                except ModelError as exc:
+                    if exc.kind != "network":
+                        raise
+                    log.warning("GitHub download failed (%s), using the official OPUS-MT storage", exc)
+                else:
+                    if digest != entry["sha256"] or tmp_zip.stat().st_size != entry["size"]:
+                        tmp_zip.unlink(missing_ok=True)
+                        log.error("SHA-256 mismatch for %s: expected %s, got %s", url, entry["sha256"], digest)
+                        raise ModelError("integrity", f"downloaded file for {src}->{tgt} failed verification")
+                    log.info("Downloaded and verified %s in %.1fs", url, time.perf_counter() - t0)
+                    return self._install_converted(tmp_zip, src, tgt, spec, entry)
             self._fetch(spec["url"], tmp_zip, progress)
             log.info("Downloaded %s in %.1fs", spec["url"], time.perf_counter() - t0)
             return self._install(tmp_zip, src, tgt, spec)
         finally:
             tmp_zip.unlink(missing_ok=True)
 
-    def _fetch(self, url: str, dest: Path, progress: Progress | None, attempts: int = 4) -> None:
-        """Download `url` to `dest`. The OPUS-MT servers are sometimes slow: when the connection
-        drops or times out, resume from the last byte (HTTP Range) instead of starting over."""
+    def _install_converted(self, zip_path: Path, src: str, tgt: str, spec: dict, entry: dict) -> InstalledModel:
+        """Install a model package from the KeepT release (already CTranslate2 int8)."""
+        final = self.pair_dir(src, tgt)
+        staging = Path(tempfile.mkdtemp(prefix=f".{src}_{tgt}-", dir=self.root))
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                for name in zf.namelist():
+                    parts = name.split("/")
+                    if name.endswith("/") or ".." in parts or name.startswith(("/", "\\")) or ":" in name:
+                        continue
+                    if len(parts) > 2 or (len(parts) == 2 and parts[0] != "model"):
+                        continue
+                    target = staging.joinpath(*parts)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(name) as fsrc, open(target, "wb") as fdst:
+                        shutil.copyfileobj(fsrc, fdst, 1 << 20)
+            if not (staging / "model" / "model.bin").exists() or not (staging / "source.spm").exists():
+                raise ModelError("corrupt", "incomplete model package")
+            size = _dir_size(staging)
+            (staging / MARKER).write_text(json.dumps({
+                "src": src, "tgt": tgt, "version": spec["version"], "url": spec["url"], "tokenizer": "marian",
+                "size": size, "package_sha256": entry["sha256"], "source": "github",
+            }), encoding="utf-8")
+            if final.exists():
+                shutil.rmtree(final, ignore_errors=True)
+            staging.rename(final)
+        except zipfile.BadZipFile as exc:
+            raise ModelError("corrupt", "model package is not a valid zip") from exc
+        except OSError as exc:
+            raise ModelError("disk", str(exc)) from exc
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+        model = self.get(src, tgt)
+        assert model is not None
+        return model
+
+    def _fetch(self, url: str, dest: Path, progress: Progress | None, attempts: int = 4) -> str:
+        """Download `url` to `dest` and return its SHA-256. When the connection drops or times
+        out, resume from the last byte (HTTP Range) instead of starting over."""
+        import hashlib
+
+        digest = hashlib.sha256()
         done = 0
         total = 0
         last = 0.0
@@ -167,12 +242,14 @@ class ModelStore:
                             out.seek(0)
                             out.truncate()
                             done = 0  # the server ignored the range: start again
+                            digest = hashlib.sha256()
                         total = total or (done + length)
                         while True:
                             chunk = resp.read(1 << 18)
                             if not chunk:
                                 break
                             out.write(chunk)
+                            digest.update(chunk)
                             done += len(chunk)
                             now = time.monotonic()
                             if progress and (now - last > 0.1):
@@ -182,7 +259,7 @@ class ModelStore:
                         raise OSError(f"connection closed at {done}/{total} bytes")
                     if progress:
                         progress(done, total or done)
-                    return
+                    return digest.hexdigest()
                 except OSError as exc:  # includes timeouts and dropped connections
                     if isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 28:
                         raise ModelError("disk", str(exc)) from exc

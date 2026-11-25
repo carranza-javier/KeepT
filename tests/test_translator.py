@@ -327,3 +327,67 @@ def test_conversion_failure_in_child_process_is_reported(tmp_path):
     with pytest.raises(ModelError) as err:
         convert_marian(tmp_path / "raw", tmp_path / "out")
     assert err.value.kind == "corrupt"
+
+
+# -- models from the KeepT GitHub release ------------------------------------------
+def converted_package():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("model/model.bin", b"ct2-int8")
+        zf.writestr("model/config.json", b"{}")
+        zf.writestr("model/shared_vocabulary.json", b"[]")
+        for name in ("source.spm", "target.spm", "LICENSE", "README.md", "NOTICE.txt"):
+            zf.writestr(name, b"x")
+        zf.writestr("../evil.txt", b"x")
+    return buf.getvalue()
+
+
+def github_manifest(package, sha=None):
+    import hashlib
+
+    return {"base_url": "https://github.invalid/models-v1/", "models": {"de-en": {
+        "file": "de-en.zip", "size": len(package), "sha256": sha or hashlib.sha256(package).hexdigest(),
+        "opus_url": SPEC["url"], "target_label": None}}}
+
+
+def test_model_comes_from_github_release_and_is_verified(tmp_path):
+    package = converted_package()
+    calls = []
+    store = ModelStore(tmp_path / "models", opener=opener_for(package, calls), catalog={("de", "en"): SPEC},
+                       manifest=github_manifest(package))
+    info = store.ensure("de", "en")
+    assert calls == ["https://github.invalid/models-v1/de-en.zip"]  # no OPUS-MT download, no conversion
+    assert (info.path / "model" / "model.bin").read_bytes() == b"ct2-int8"
+    assert (info.path / "NOTICE.txt").exists()
+    assert not (tmp_path / "evil.txt").exists()
+    assert json.loads((info.path / "keept.json").read_text())["source"] == "github"
+
+
+def test_sha256_mismatch_discards_the_file(tmp_path):
+    package = converted_package()
+    store = ModelStore(tmp_path, opener=opener_for(package), catalog={("de", "en"): SPEC},
+                       manifest=github_manifest(package, sha="0" * 64))
+    with pytest.raises(ModelError) as err:
+        store.ensure("de", "en")
+    assert err.value.kind == "integrity"
+    assert store.get("de", "en") is None
+    assert not [p for p in tmp_path.iterdir() if p.name != "index.json"]  # nothing left behind
+
+
+def test_falls_back_to_official_storage_when_github_fails(tmp_path, fake_converter, monkeypatch):
+    import keept.translate.models as models
+
+    monkeypatch.setattr(models.time, "sleep", lambda s: None)
+    calls = []
+
+    def opener(url, timeout=0, offset=0):
+        calls.append(url)
+        if "github" in url:
+            raise OSError("github unreachable")
+        return FakeResponse(marian_package())
+
+    store = ModelStore(tmp_path, opener=opener, catalog={("de", "en"): SPEC},
+                       manifest=github_manifest(converted_package()))
+    info = store.ensure("de", "en")
+    assert calls[-1] == SPEC["url"] and any("github" in c for c in calls)
+    assert (info.path / "model" / "model.bin").read_bytes() == b"ct2"  # converted locally

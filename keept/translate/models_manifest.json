@@ -1,0 +1,319 @@
+{
+ "base_url": "https://github.com/carranza-javier/KeepT/releases/download/models-v1/",
+ "models": {
+  "de-en": {
+   "file": "de-en.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/deu-eng/opus+bt-2021-04-30.zip",
+   "opus_version": "opus+bt-2021-04-30",
+   "sha256": "803bdf1827c5b888e36d16a19d6f7b78b76b817322af4640ec090a94f8124a67",
+   "size": 83883482,
+   "target_label": null
+  },
+  "de-es": {
+   "file": "de-es.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/de-es/opus-2020-01-15.zip",
+   "opus_version": "opus-2020-01-15",
+   "sha256": "7c947226619e78b52dc7434795d2dec5fb94c007f2ef73b06e0cb4e4d0fb59b0",
+   "size": 81964551,
+   "target_label": null
+  },
+  "de-fr": {
+   "file": "de-fr.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/deu-fra/opus-2021-02-22.zip",
+   "opus_version": "opus-2021-02-22",
+   "sha256": "20543144af2fe9951300a35fc2f98108db34a0d76183171f961d2ab4699c26be",
+   "size": 80304133,
+   "target_label": null
+  },
+  "de-it": {
+   "file": "de-it.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/de-it/opus-2020-01-20.zip",
+   "opus_version": "opus-2020-01-20",
+   "sha256": "31541c2f6cb2dedba2601b152e31fd1bf0a602d3090529cecc96c0c8ea9c08c7",
+   "size": 81201950,
+   "target_label": null
+  },
+  "de-nl": {
+   "file": "de-nl.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/deu-nld/opus-2021-02-19.zip",
+   "opus_version": "opus-2021-02-19",
+   "sha256": "2bb70e1d3c7025081597e047f6e2cce9475e55540fd5c79c5dbdde5c5165928f",
+   "size": 79550512,
+   "target_label": null
+  },
+  "de-pl": {
+   "file": "de-pl.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/de-pl/opus-2020-01-20.zip",
+   "opus_version": "opus-2020-01-20",
+   "sha256": "dc953f3a19a2084913baace13f640060e5ea567cc30be75505e8802fddbba3b5",
+   "size": 81519774,
+   "target_label": null
+  },
+  "en-de": {
+   "file": "en-de.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/eng-deu/opusTCv20210807+bt-2021-12-08.zip",
+   "opus_version": "opusTCv20210807+bt-2021-12-08",
+   "sha256": "8159cb5870ef68179493eb0a5e1cb4fc00ad4912749cf1ed432615ac6f996ce1",
+   "size": 254141955,
+   "target_label": null
+  },
+  "en-es": {
+   "file": "en-es.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/eng-spa/opus+bt-2021-04-10.zip",
+   "opus_version": "opus+bt-2021-04-10",
+   "sha256": "b4c2ecd70102b12f18f281da1f503cc51f9f4f5a40062385ed8d06747875b9da",
+   "size": 83869920,
+   "target_label": null
+  },
+  "en-fr": {
+   "file": "en-fr.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/eng-fra/opus-2021-02-22.zip",
+   "opus_version": "opus-2021-02-22",
+   "sha256": "70347928d6495238b6165ab6a2228c0817cbf178cd28bc4be607539045187da6",
+   "size": 83868865,
+   "target_label": null
+  },
+  "en-it": {
+   "file": "en-it.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/en-it/opus-2019-12-04.zip",
+   "opus_version": "opus-2019-12-04",
+   "sha256": "104ac12e1e65d4ddc371fb64311503b6cf266b5006922abeebd3510454aefc1b",
+   "size": 91865677,
+   "target_label": null
+  },
+  "en-nl": {
+   "file": "en-nl.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/eng-nld/opus+bt-2021-04-14.zip",
+   "opus_version": "opus+bt-2021-04-14",
+   "sha256": "17c34a2e2ab3dc2d392039396d3712d35b4de94137749ba32fa42a42a6342d8b",
+   "size": 79384369,
+   "target_label": null
+  },
+  "en-pl": {
+   "file": "en-pl.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/eng-pol/opus+bt-2021-04-14.zip",
+   "opus_version": "opus+bt-2021-04-14",
+   "sha256": "3ea0efdc3f1e184f40a68207d4b4b93e17a5a89833bd63896c487a5dbea5b8c1",
+   "size": 83883927,
+   "target_label": null
+  },
+  "en-pt": {
+   "file": "en-pt.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/eng-por/opus+bt-2021-04-14.zip",
+   "opus_version": "opus+bt-2021-04-14",
+   "sha256": "5a2a6503ff9717c798b8841b2935880796be12c4316c7ab4dee30d17fce7dd57",
+   "size": 81381390,
+   "target_label": ">>por<<"
+  },
+  "es-de": {
+   "file": "es-de.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/spa-deu/opusTCv20210807_transformer-big_2022-07-22.zip",
+   "opus_version": "opusTCv20210807_transformer-big_2022-07-22",
+   "sha256": "216193b9b02b2d5a9c1e9f7d67d0f80cc7689b8e24b2fd975f96b2816581cce2",
+   "size": 245579753,
+   "target_label": null
+  },
+  "es-en": {
+   "file": "es-en.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/spa-eng/opus+bt-2021-04-30.zip",
+   "opus_version": "opus+bt-2021-04-30",
+   "sha256": "55bef5409f44fec817b62e840430c84735bff992378c41d9c70d1761e91e15c5",
+   "size": 83869925,
+   "target_label": null
+  },
+  "es-fr": {
+   "file": "es-fr.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/es-fr/opus-2020-01-08.zip",
+   "opus_version": "opus-2020-01-08",
+   "sha256": "226ef1db0648eb730e0403d7bba1c2eb38243617a99640fe66ac67de0340f183",
+   "size": 89108484,
+   "target_label": null
+  },
+  "es-it": {
+   "file": "es-it.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/es-it/opus-2020-01-29.zip",
+   "opus_version": "opus-2020-01-29",
+   "sha256": "e9565b31d50fcf1d51f5b05ad5184513a5cd7bae0770b4c50ea641e3d21cd796",
+   "size": 80737454,
+   "target_label": null
+  },
+  "es-nl": {
+   "file": "es-nl.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/es-nl/opus-2020-01-20.zip",
+   "opus_version": "opus-2020-01-20",
+   "sha256": "3cf1557507666383c335e297d9acb1239482e11a341b1f235badb0afac37fced",
+   "size": 80353072,
+   "target_label": null
+  },
+  "es-pl": {
+   "file": "es-pl.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/es-pl/opus-2020-01-20.zip",
+   "opus_version": "opus-2020-01-20",
+   "sha256": "e7c536fd35681757d842d856cf8cc4fb14be43f7d3a0243d795e4b5c56bf674d",
+   "size": 81095454,
+   "target_label": null
+  },
+  "fr-de": {
+   "file": "fr-de.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/fra-deu/opusTCv20210807_transformer-big_2022-07-22.zip",
+   "opus_version": "opusTCv20210807_transformer-big_2022-07-22",
+   "sha256": "14e465e3b4fc1b05d3f47af03d1d98d0a8f9632a2f219f2f4ad51c837ffc89b8",
+   "size": 244935681,
+   "target_label": null
+  },
+  "fr-en": {
+   "file": "fr-en.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/fra-eng/opusTCv20210807+bt_transformer-big_2022-03-09.zip",
+   "opus_version": "opusTCv20210807+bt_transformer-big_2022-03-09",
+   "sha256": "81f974c96a9330bd40dbb1fda8cffc800d0c1deb50a712be1724b8b2c3f0e72b",
+   "size": 241589959,
+   "target_label": null
+  },
+  "fr-es": {
+   "file": "fr-es.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/fr-es/opus-2020-01-09.zip",
+   "opus_version": "opus-2020-01-09",
+   "sha256": "7a14ed8fdea7e56612ad1a92a6657b72a9d9426043c63c6041948f7773b203d4",
+   "size": 89108484,
+   "target_label": null
+  },
+  "fr-nl": {
+   "file": "fr-nl.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/fra-nld/opus-2021-02-18.zip",
+   "opus_version": "opus-2021-02-18",
+   "sha256": "88c10d8c12e091c0e884c47cc42fd65674edeebe491a101bff6384fad184ef0c",
+   "size": 79451561,
+   "target_label": null
+  },
+  "fr-pl": {
+   "file": "fr-pl.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/fr-pl/opus-2020-01-16.zip",
+   "opus_version": "opus-2020-01-16",
+   "sha256": "6acd5b42592d00436d3053e77b5156fde8ca4bc64089a97e0bfc0a035e9861e2",
+   "size": 81294912,
+   "target_label": null
+  },
+  "fr-pt": {
+   "file": "fr-pt.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/fra-por/opus-2021-05-15.zip",
+   "opus_version": "opus-2021-05-15",
+   "sha256": "c625b9c4183e52ff593dffdc5ae08cfa9e9d2735fa5efb91bac19fd6e6252bc2",
+   "size": 79418125,
+   "target_label": ">>por<<"
+  },
+  "it-de": {
+   "file": "it-de.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/it-de/opus-2020-01-20.zip",
+   "opus_version": "opus-2020-01-20",
+   "sha256": "6720e7c84eff58b4ee30417ff7d40b0fc6bb94a5447d8ed7e6723182fdc97135",
+   "size": 81201950,
+   "target_label": null
+  },
+  "it-en": {
+   "file": "it-en.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/ita-eng/opusTCv20210807+bt_transformer-big_2022-02-25.zip",
+   "opus_version": "opusTCv20210807+bt_transformer-big_2022-02-25",
+   "sha256": "f901bf547c7734620369661c8f259464604cd4458970fcc4b372eb4ec34700a7",
+   "size": 243035115,
+   "target_label": null
+  },
+  "it-es": {
+   "file": "it-es.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/it-es/opus-2020-01-26.zip",
+   "opus_version": "opus-2020-01-26",
+   "sha256": "89cb71b43f9ed41edd27616d2b6478ad2b223a253a8cd748fb866378978a5258",
+   "size": 80737454,
+   "target_label": null
+  },
+  "it-fr": {
+   "file": "it-fr.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/it-fr/opus-2020-01-16.zip",
+   "opus_version": "opus-2020-01-16",
+   "sha256": "e58913e967c6ae54464bb8719ed40d7996a78298c81f6b60019439671ff2336d",
+   "size": 80906582,
+   "target_label": null
+  },
+  "nl-de": {
+   "file": "nl-de.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/nld-deu/opus-2021-02-19.zip",
+   "opus_version": "opus-2021-02-19",
+   "sha256": "1426349235f88be82f81911922b38de54bb1d60e895519dfb7183a3684343116",
+   "size": 79550509,
+   "target_label": null
+  },
+  "nl-en": {
+   "file": "nl-en.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/nld-eng/opus+bt-2021-04-30.zip",
+   "opus_version": "opus+bt-2021-04-30",
+   "sha256": "ccd3bb91b14bce3944965eeaabf44e5453d62b69272500136c4dff9e99affa13",
+   "size": 79384368,
+   "target_label": null
+  },
+  "nl-es": {
+   "file": "nl-es.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/nl-es/opus-2020-01-16.zip",
+   "opus_version": "opus-2020-01-16",
+   "sha256": "34f2195e331e6dce1a3f2683cce3315b50e7a703e617c255cf816e077f440e2f",
+   "size": 80353074,
+   "target_label": null
+  },
+  "nl-fr": {
+   "file": "nl-fr.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/nld-fra/opus-2021-02-18.zip",
+   "opus_version": "opus-2021-02-18",
+   "sha256": "f4687cdf8435f4ea56c380e1730aae40439e1bcc8a81e4c2db4c5021496a09dc",
+   "size": 79451560,
+   "target_label": null
+  },
+  "pl-de": {
+   "file": "pl-de.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/pl-de/opus-2020-01-21.zip",
+   "opus_version": "opus-2020-01-21",
+   "sha256": "29da866268891cf3ebde66fa7cb97131081a52de3b8ed85191142f1bebd3ec32",
+   "size": 81519776,
+   "target_label": null
+  },
+  "pl-en": {
+   "file": "pl-en.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/pol-eng/opusTCv20210807+bt_transformer-big_2022-03-11.zip",
+   "opus_version": "opusTCv20210807+bt_transformer-big_2022-03-11",
+   "sha256": "ef13527eceb27975dd647232d2cf3e85d67366dc8f6a11a6c1a1663968be0158",
+   "size": 246006473,
+   "target_label": null
+  },
+  "pl-es": {
+   "file": "pl-es.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/pl-es/opus-2020-01-21.zip",
+   "opus_version": "opus-2020-01-21",
+   "sha256": "1b4af8af3f5d05aaf268a6eeacb28d459cce5e7f5fbdbaa37e99090412f16cde",
+   "size": 81095455,
+   "target_label": null
+  },
+  "pl-fr": {
+   "file": "pl-fr.zip",
+   "opus_url": "https://object.pouta.csc.fi/OPUS-MT-models/pl-fr/opus-2020-01-16.zip",
+   "opus_version": "opus-2020-01-16",
+   "sha256": "03a20142120cdea44e1f8ece41b1ce4032c37a87dca04798a63613dc893acd83",
+   "size": 81294913,
+   "target_label": null
+  },
+  "pt-de": {
+   "file": "pt-de.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/por-deu/opusTCv20210807_transformer-big_2022-07-22.zip",
+   "opus_version": "opusTCv20210807_transformer-big_2022-07-22",
+   "sha256": "a7fbaea87726967f576760b67f8d45e48459cc0978d576458227bda686e438a1",
+   "size": 245896092,
+   "target_label": null
+  },
+  "pt-en": {
+   "file": "pt-en.zip",
+   "opus_url": "https://object.pouta.csc.fi/Tatoeba-MT-models/por-eng/opus+bt-2021-04-30.zip",
+   "opus_version": "opus+bt-2021-04-30",
+   "sha256": "90e31887ebeba1c5f446e5d1aa66fa1e37153c3127a728082cb65fff2d83cf26",
+   "size": 81208890,
+   "target_label": null
+  }
+ },
+ "release": "models-v1",
+ "repo": "carranza-javier/KeepT"
+}
