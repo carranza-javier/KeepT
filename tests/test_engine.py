@@ -52,7 +52,7 @@ def test_release_and_reload_most_likely_pair_first():
     assert tr.loaded_pairs() == []
     log.clear()
     engine.reload_models("es", likely_src="en")
-    wait(engine._tr_pool)
+    wait(engine._load_pool)
     assert [e for e in log if e[0] == "load"] == [("load", ("en", "es")), ("load", ("de", "es"))]
 
 
@@ -64,8 +64,10 @@ def test_translation_requested_during_reload_waits_for_models():
     engine.reload_models("es", likely_src="de")
     engine.translate(7, [TranslationJob(1, "Hallo.", "de")], "es")
     wait(engine._tr_pool)
-    loads = [i for i, e in enumerate(log) if e[0] == "load"]
+    wait(engine._load_pool)
     first_translate = next(i for i, e in enumerate(log) if e[0] == "translate")
-    assert max(loads) < first_translate  # reload finished before translating
+    # The job waited for its own model (loaded first, as the most likely pair), not for all.
+    assert log.index(("load", ("de", "es"))) < first_translate
+    assert log.count(("load", ("de", "es"))) == 1
     assert results == ["[de>es]Hallo."]
     engine.shutdown()

@@ -44,6 +44,9 @@ class Engine(QObject):
         # Downloads get their own thread so a long model download never blocks translating
         # with the models that are already there.
         self._dl_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-download")
+        # Reloads after inactivity run on their own thread: a translation then waits only for
+        # the model it needs (the translator's load lock), not for every model of the target.
+        self._load_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-load")
         self._active = 0
         self._lock = threading.Lock()
 
@@ -252,7 +255,7 @@ class Engine(QObject):
         missing = [p for p in pairs if not self.translator.is_pair_loaded(p)
                    and self.translator.store.get(*p) is not None]
         if missing:
-            self._tr_pool.submit(self._run_reload, tgt, missing)
+            self._load_pool.submit(self._run_reload, tgt, missing)
 
     def _run_reload(self, tgt: str, pairs) -> None:
         t0 = time.perf_counter()
@@ -268,3 +271,4 @@ class Engine(QObject):
         self._ocr_pool.shutdown(wait=False, cancel_futures=True)
         self._tr_pool.shutdown(wait=False, cancel_futures=True)
         self._dl_pool.shutdown(wait=False, cancel_futures=True)
+        self._load_pool.shutdown(wait=False, cancel_futures=True)
