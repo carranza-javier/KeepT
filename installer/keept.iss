@@ -185,7 +185,7 @@ Root: HKCU; Subkey: "Software\KeepT"; ValueType: dword; ValueName: "CheckUpdates
 Root: HKCU; Subkey: "Software\KeepT"; ValueType: dword; ValueName: "CheckUpdates"; ValueData: 0; Flags: uninsdeletekey; Tasks: not updates
 
 [Run]
-Filename: "{app}\{#AppExe}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#AppExe}"; Flags: runhidden; RunOnceId: "StopKeepT"
@@ -446,6 +446,55 @@ begin
   UpdateSize(nil);
 
   DownloadPage := CreateDownloadPage(CustomMessage('DownloadingLanguages'), CustomMessage('DownloadingLanguagesHint'), nil);
+end;
+
+// Inno Setup's check lists (tasks page, "launch KeepT" on the last page) clip their boxes on the
+// left with a high display scaling, depending on the monitor setup (fixed only in Inno Setup
+// 7.2, still a preview). They are hidden and shown as plain check boxes that stay in sync with
+// the original list, which Setup keeps using for the tasks and the run entries.
+var
+  TaskBoxes, RunBoxes: array of TNewCheckBox;
+
+procedure TaskBoxClick(Sender: TObject);
+begin
+  WizardForm.TasksList.Checked[TNewCheckBox(Sender).Tag] := TNewCheckBox(Sender).Checked;
+end;
+
+procedure RunBoxClick(Sender: TObject);
+begin
+  WizardForm.RunList.Checked[TNewCheckBox(Sender).Tag] := TNewCheckBox(Sender).Checked;
+end;
+
+procedure MirrorCheckList(List: TNewCheckListBox; var Boxes: array of TNewCheckBox; OnClick: TNotifyEvent);
+var
+  I: Integer;
+begin
+  for I := 0 to GetArrayLength(Boxes) - 1 do
+    Boxes[I].Free;
+  SetArrayLength(Boxes, List.Items.Count);
+  for I := 0 to List.Items.Count - 1 do
+  begin
+    Boxes[I] := TNewCheckBox.Create(WizardForm);
+    Boxes[I].Parent := List.Parent;
+    Boxes[I].Caption := List.ItemCaption[I];
+    Boxes[I].Checked := List.Checked[I];
+    Boxes[I].Enabled := List.ItemEnabled[I];
+    Boxes[I].Tag := I;
+    Boxes[I].Left := List.Left + ScaleX(4);
+    Boxes[I].Top := List.Top + ScaleY(2) + I * ScaleY(26);
+    Boxes[I].Width := List.Width - ScaleX(8);
+    Boxes[I].Height := ScaleY(22);
+    Boxes[I].OnClick := OnClick;
+  end;
+  List.Visible := False;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpSelectTasks then
+    MirrorCheckList(WizardForm.TasksList, TaskBoxes, @TaskBoxClick)
+  else if (CurPageID = wpFinished) and (WizardForm.RunList.Items.Count > 0) then
+    MirrorCheckList(WizardForm.RunList, RunBoxes, @RunBoxClick);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
