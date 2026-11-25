@@ -138,6 +138,21 @@ def main() -> int:
     ov._on_translated(ov.session, 60, "Hola de nuevo")
     assert ov.last_stroke_path is None
 
+    # Short labels on a German screen, target Spanish: a Spanish label is left alone, English
+    # labels are sent as English, and a half translated result is discarded.
+    ov.screen_lang = "de"
+    engine.jobs.clear()
+    labels = [("Guardar cambios", 71), ("Restart now", 72), ("Release notes", 73), ("Alle akzeptieren", 74)]
+    ov.translate_blocks([Block([Line([Word(t, Rect(100, 800 + 30 * i, 160, 21))])], id=k, lang="de")
+                         for i, (t, k) in enumerate(labels)])
+    sent = {job.text: job.src for job in engine.jobs[-1][1]}
+    assert sent == {"Restart now": "en", "Release notes": "en", "Alle akzeptieren": "de"}, sent
+    key = {job.text: job.key for job in engine.jobs[-1][1]}
+    ov._on_translated(ov.session, key["Release notes"], "Publicación notes")
+    assert key["Release notes"] not in ov.items  # the original stays visible
+    ov._on_translated(ov.session, key["Restart now"], "Reiniciar ahora")
+    assert ov.items[key["Restart now"]].status == "done"
+
     # A block in a language whose Windows OCR pack is missing is reported (once per request).
     from keept.ocr import backend as ocr_backend
 

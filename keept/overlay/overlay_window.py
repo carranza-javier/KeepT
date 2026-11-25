@@ -451,21 +451,27 @@ class OverlayWindow(QWidget):
         """Avoid downloading a model because of an unsure guess: if the detected language has no
         installed model and the evidence is weak (short text, probability < 0.9), use the most
         likely language among those that can already be translated (or the target itself)."""
+        from ..translate import langdetect, lexicon
+        from ..translate.translator import route
+
+        if langdetect.may_already_be(block.text, tgt):
+            return tgt  # never break a label that may already be in the target language
         lang = block.lang or self.screen_lang or "en"
+        if not langdetect.clearly(block.text, lang) and lexicon.languages_of(block.text):
+            # A short label of known words is judged by its own words, not by the screen.
+            lang = langdetect.detect(block.text, prior=self.screen_lang, target=tgt)[0] or lang
         translator = getattr(self.engine, "translator", None)
         if translator is None or lang == tgt:
             return lang
-        from ..translate import langdetect
-        from ..translate.translator import route
 
         def ready(src: str) -> bool:
             return src == tgt or all(translator.store.get(*p) for p in route(src, tgt))
 
         if ready(lang):
             return lang
-        probs = langdetect.scores(block.text)
-        if probs.get(lang, 0.0) >= 0.9 or len(block.text.split()) >= 8:
+        if langdetect.clearly(block.text, lang):
             return lang  # clear evidence: worth downloading the model
+        probs = langdetect.scores(block.text)
         usable = {code: p for code, p in probs.items() if ready(code)}
         return max(usable, key=usable.get) if usable else lang
 
@@ -551,6 +557,14 @@ class OverlayWindow(QWidget):
             return
         item = self.items.get(key)
         if item is None:
+            return
+        from ..translate.lexicon import foreign_leftovers
+
+        leftovers = foreign_leftovers(item.block.text, text, self.target)
+        if leftovers:
+            # A half translated text ("Publicación notes") is worse than the original: keep it.
+            log.info("Discarded a mixed translation of block %d (%s left untranslated)", key, ", ".join(leftovers))
+            del self.items[key]
             return
         item.text = text
         try:
