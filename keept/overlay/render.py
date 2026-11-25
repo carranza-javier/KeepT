@@ -130,6 +130,15 @@ def is_boxed(bgra: np.ndarray, rect: Rect, bg: RGB, line_height: float) -> bool:
     return any(horizontal)
 
 
+def _busy(bgra: np.ndarray, box, bg: RGB, axis: int) -> np.ndarray:
+    """Indices along the scan direction where the region stops being plain background.
+    axis=0 scans columns (horizontal search), axis=1 scans rows (vertical search)."""
+    a, b, c, d = box
+    px = bgra[b:d, a:c, 2::-1].astype(np.int16)  # only the band being searched, never the full image
+    differs = np.abs(px - np.array(bg, np.int16)).sum(axis=2) > 40
+    return np.nonzero(differs.mean(axis=axis) > 0.02)[0]
+
+
 def free_space_right(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:
     """How far (px) the background continues to the right of `rect` without other content.
     Stops at text, borders or any change of background colour."""
@@ -137,31 +146,40 @@ def free_space_right(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> fl
     box = _clip_box(bgra.shape, x0, rect.y, x0 + max_px, rect.bottom)
     if box is None:
         return 0.0
-    px = _rgb_pixels(bgra, box).reshape(box[3] - box[1], box[2] - box[0], 3).astype(np.int16)
-    differs = np.abs(px - np.array(bg, np.int16)).sum(axis=2) > 40
-    busy = np.nonzero(differs.mean(axis=0) > 0.02)[0]
+    busy = _busy(bgra, box, bg, axis=0)
     return float(busy[0]) if len(busy) else float(box[2] - box[0])
 
 
 def free_space_left(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:
     """Same as free_space_right, towards the left."""
-    flipped = np.ascontiguousarray(bgra[:, ::-1])
-    w = bgra.shape[1]
-    mirrored = Rect(w - rect.right, rect.y, rect.w, rect.h)
-    return free_space_right(flipped, mirrored, bg, max_px)
+    x1 = int(math.floor(rect.x)) - 2  # skip one column, like free_space_right does
+    box = _clip_box(bgra.shape, x1 - max_px + 1, rect.y, x1 + 1, rect.bottom)
+    if box is None:
+        return 0.0
+    busy = _busy(bgra, box, bg, axis=0)
+    width = box[2] - box[0]
+    return float(width - 1 - busy[-1]) if len(busy) else float(width)
 
 
 def free_space_below(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:
     """How far (px) the background continues below `rect` without other content."""
-    transposed = np.ascontiguousarray(bgra.transpose(1, 0, 2))
-    return free_space_right(transposed, Rect(rect.y, rect.x, rect.h, rect.w), bg, max_px)
+    y0 = int(math.ceil(rect.bottom)) + 1
+    box = _clip_box(bgra.shape, rect.x, y0, rect.right, y0 + max_px)
+    if box is None:
+        return 0.0
+    busy = _busy(bgra, box, bg, axis=1)
+    return float(busy[0]) if len(busy) else float(box[3] - box[1])
 
 
 def free_space_above(bgra: np.ndarray, rect: Rect, bg: RGB, max_px: float) -> float:
     """How far (px) the background continues above `rect` without other content."""
-    flipped = np.ascontiguousarray(bgra[::-1])
-    h = bgra.shape[0]
-    return free_space_below(flipped, Rect(rect.x, h - rect.bottom, rect.w, rect.h), bg, max_px)
+    y1 = int(math.floor(rect.y)) - 2  # skip one row, like free_space_below does
+    box = _clip_box(bgra.shape, rect.x, y1 - max_px + 1, rect.right, y1 + 1)
+    if box is None:
+        return 0.0
+    busy = _busy(bgra, box, bg, axis=1)
+    height = box[3] - box[1]
+    return float(height - 1 - busy[-1]) if len(busy) else float(height)
 
 
 @dataclass
