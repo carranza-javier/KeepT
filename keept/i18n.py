@@ -207,6 +207,16 @@ _STRINGS = {
         'nl': 'De gekozen talen worden nu zonder wachten vertaald.',
         'pl': 'Wybrane języki są teraz tłumaczone bez czekania.',
     },
+    'languages_target_mark': {
+        'de': '(Ziel)',
+        'en': '(target)',
+        'es': '(destino)',
+        'fr': '(cible)',
+        'it': '(destinazione)',
+        'pt': '(destino)',
+        'nl': '(doel)',
+        'pl': '(docelowy)',
+    },
     'loading_model': {
         'de': 'Sprachmodell wird vorbereitet…',
         'en': 'Preparing language model…',

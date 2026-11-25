@@ -34,6 +34,9 @@ UninstallDisplayIcon={app}\{#AppExe}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; KeepT icon instead of Inno Setup's default images, one file per display scaling (100 to 200 %)
+WizardSmallImageFile=..\packaging\wizard\small-100.bmp,..\packaging\wizard\small-125.bmp,..\packaging\wizard\small-150.bmp,..\packaging\wizard\small-200.bmp
+WizardImageFile=..\packaging\wizard\large-100.bmp,..\packaging\wizard\large-125.bmp,..\packaging\wizard\large-150.bmp,..\packaging\wizard\large-200.bmp
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=force
@@ -103,22 +106,6 @@ it.TranslateFrom=Traduci da:
 pt.TranslateFrom=Traduzir de:
 nl.TranslateFrom=Vertalen uit:
 pl.TranslateFrom=Tłumacz z:
-en.DownloadSize=Download during installation: about %1 MB (only this once).
-de.DownloadSize=Download während der Installation: etwa %1 MB (nur dieses eine Mal).
-es.DownloadSize=Descarga durante la instalación: unos %1 MB (solo esta vez).
-fr.DownloadSize=Téléchargement pendant l'installation : environ %1 Mo (une seule fois).
-it.DownloadSize=Download durante l'installazione: circa %1 MB (solo questa volta).
-pt.DownloadSize=Transferência durante a instalação: cerca de %1 MB (só desta vez).
-nl.DownloadSize=Download tijdens de installatie: ongeveer %1 MB (alleen deze keer).
-pl.DownloadSize=Pobieranie podczas instalacji: około %1 MB (tylko ten jeden raz).
-en.DownloadNone=Nothing to download: these languages are ready.
-de.DownloadNone=Nichts herunterzuladen: diese Sprachen sind bereit.
-es.DownloadNone=No hay nada que descargar: estos idiomas ya están listos.
-fr.DownloadNone=Rien à télécharger : ces langues sont prêtes.
-it.DownloadNone=Niente da scaricare: queste lingue sono pronte.
-pt.DownloadNone=Nada para transferir: estes idiomas já estão prontos.
-nl.DownloadNone=Niets te downloaden: deze talen zijn klaar.
-pl.DownloadNone=Nie ma nic do pobrania: te języki są gotowe.
 en.DownloadingLanguages=Downloading languages (only this once)
 de.DownloadingLanguages=Sprachen werden heruntergeladen (nur dieses eine Mal)
 es.DownloadingLanguages=Descargando idiomas (solo esta vez)
@@ -143,6 +130,39 @@ it.InstallingLanguages=Installazione delle lingue...
 pt.InstallingLanguages=A instalar idiomas...
 nl.InstallingLanguages=Talen installeren...
 pl.InstallingLanguages=Instalowanie języków...
+
+en.DownloadSize=Download during installation: about %1 MB, %2 of the %3 language models needed (only this once).
+de.DownloadSize=Download während der Installation: etwa %1 MB, %2 der %3 benötigten Sprachmodelle (nur dieses eine Mal).
+es.DownloadSize=Descarga durante la instalación: unos %1 MB, %2 de los %3 modelos de idioma necesarios (solo esta vez).
+fr.DownloadSize=Téléchargement pendant l'installation : environ %1 Mo, %2 des %3 modèles de langue nécessaires (une seule fois).
+it.DownloadSize=Download durante l'installazione: circa %1 MB, %2 dei %3 modelli linguistici necessari (solo questa volta).
+pt.DownloadSize=Transferência durante a instalação: cerca de %1 MB, %2 dos %3 modelos de idioma necessários (só desta vez).
+nl.DownloadSize=Download tijdens de installatie: ongeveer %1 MB, %2 van de %3 benodigde taalmodellen (alleen deze keer).
+pl.DownloadSize=Pobieranie podczas instalacji: około %1 MB, %2 z %3 potrzebnych modeli językowych (tylko ten jeden raz).
+en.DownloadNone=Nothing to download: the %1 language models needed are already installed.
+de.DownloadNone=Nichts herunterzuladen: die %1 benötigten Sprachmodelle sind bereits installiert.
+es.DownloadNone=No hay nada que descargar: los %1 modelos de idioma necesarios ya están instalados.
+fr.DownloadNone=Rien à télécharger : les %1 modèles de langue nécessaires sont déjà installés.
+it.DownloadNone=Niente da scaricare: i %1 modelli linguistici necessari sono già installati.
+pt.DownloadNone=Nada para transferir: os %1 modelos de idioma necessários já estão instalados.
+nl.DownloadNone=Niets te downloaden: de %1 benodigde taalmodellen zijn al geïnstalleerd.
+pl.DownloadNone=Nie ma nic do pobrania: %1 potrzebnych modeli językowych jest już zainstalowanych.
+en.NoSources=Choose at least one language to translate from.
+de.NoSources=Wähle mindestens eine Sprache, aus der übersetzt werden soll.
+es.NoSources=Elige al menos un idioma desde el que traducir.
+fr.NoSources=Choisissez au moins une langue à traduire.
+it.NoSources=Scegli almeno una lingua da cui tradurre.
+pt.NoSources=Escolha pelo menos um idioma a partir do qual traduzir.
+nl.NoSources=Kies ten minste één taal om uit te vertalen.
+pl.NoSources=Wybierz co najmniej jeden język, z którego chcesz tłumaczyć.
+en.TargetMark=(target)
+de.TargetMark=(Ziel)
+es.TargetMark=(destino)
+fr.TargetMark=(cible)
+it.TargetMark=(destinazione)
+pt.TargetMark=(destino)
+nl.TargetMark=(doel)
+pl.TargetMark=(docelowy)
 
 [Tasks]
 Name: "autostart"; Description: "{cm:Autostart}"
@@ -186,7 +206,7 @@ Type: filesandordirs; Name: "{userappdata}\KeepT"
 var
   LangPage: TWizardPage;
   TargetCombo: TNewComboBox;
-  SourceList: TNewCheckListBox;
+  SourceBoxes: array of TNewCheckBox;
   SizeLabel: TNewStaticText;
   DownloadPage: TDownloadWizardPage;
   Downloaded: String;
@@ -270,7 +290,7 @@ var
 begin
   Result := '';
   for I := 0 to GetArrayLength(LangCodes) - 1 do
-    if SourceList.Checked[I] then
+    if SourceBoxes[I].Checked then
     begin
       if Result <> '' then
         Result := Result + ',';
@@ -278,21 +298,21 @@ begin
     end;
 end;
 
-// Packages still missing for the current choice, comma separated.
-function NeededPairs: String;
+// Packages the current choice needs (Missing = only those not installed yet), comma separated.
+function ChoicePairs(Missing: Boolean): String;
 var
   I: Integer;
   Chain, Code: String;
 begin
   Result := '';
   for I := 0 to GetArrayLength(LangCodes) - 1 do
-    if SourceList.Checked[I] and (LangCodes[I] <> SelectedTarget) then
+    if SourceBoxes[I].Checked and (LangCodes[I] <> SelectedTarget) then
     begin
       Chain := KeepTRoute(LangCodes[I], SelectedTarget);
       while Chain <> '' do
       begin
         Code := PopItem(Chain);
-        if (Code <> '') and not InList(Code, Result) and not ModelInstalled(Code) then
+        if (Code <> '') and not InList(Code, Result) and not (Missing and ModelInstalled(Code)) then
         begin
           if Result <> '' then
             Result := Result + ',';
@@ -302,24 +322,63 @@ begin
     end;
 end;
 
+function NeededPairs: String;
+begin
+  Result := ChoicePairs(True);
+end;
+
+function CountItems(List: String): Integer;
+begin
+  Result := 0;
+  while List <> '' do
+    if PopItem(List) <> '' then
+      Result := Result + 1;
+end;
+
 procedure UpdateSize(Sender: TObject);
 var
   Pairs: String;
   Total: Int64;
+  Missing, All: Integer;
 begin
   Pairs := NeededPairs;
+  Missing := CountItems(Pairs);
+  All := CountItems(ChoicePairs(False));
   Total := 0;
   while Pairs <> '' do
     Total := Total + PairSizes[PairIndex(PopItem(Pairs))];
-  if Total = 0 then
-    SizeLabel.Caption := CustomMessage('DownloadNone')
+  if All = 0 then
+    SizeLabel.Caption := CustomMessage('NoSources')
+  else if Missing = 0 then
+    SizeLabel.Caption := FmtMessage(CustomMessage('DownloadNone'), [IntToStr(All)])
   else
-    SizeLabel.Caption := FmtMessage(CustomMessage('DownloadSize'), [IntToStr((Total + 524288) div 1048576)]);
+    SizeLabel.Caption := FmtMessage(CustomMessage('DownloadSize'), [IntToStr((Total + 524288) div 1048576), IntToStr(Missing), IntToStr(All)]);
+end;
+
+// The target language is shown checked, greyed out and marked "(target)": it needs no download.
+procedure ShowTarget;
+var
+  I: Integer;
+begin
+  for I := 0 to GetArrayLength(LangCodes) - 1 do
+  begin
+    if I = TargetCombo.ItemIndex then
+    begin
+      SourceBoxes[I].Checked := True;
+      SourceBoxes[I].Enabled := False;
+      SourceBoxes[I].Caption := LangNames[I] + ' ' + CustomMessage('TargetMark');
+    end
+    else
+    begin
+      SourceBoxes[I].Enabled := True;
+      SourceBoxes[I].Caption := LangNames[I];
+    end;
+  end;
 end;
 
 procedure TargetChanged(Sender: TObject);
 begin
-  SourceList.Checked[TargetCombo.ItemIndex] := True;
+  ShowTarget;
   UpdateSize(Sender);
 end;
 
@@ -355,16 +414,22 @@ begin
   SizeLabel.AutoSize := False;
   SizeLabel.WordWrap := True;
   SizeLabel.Width := LangPage.SurfaceWidth;
-  SizeLabel.Height := ScaleY(32);
-  SizeLabel.Top := LangPage.SurfaceHeight - SizeLabel.Height;
+  SizeLabel.Height := ScaleY(36);
+  SizeLabel.Top := FromLabel.Top + FromLabel.Height + ScaleY(8) + 4 * ScaleY(24) + ScaleY(10);
 
-  SourceList := TNewCheckListBox.Create(LangPage);
-  SourceList.Parent := LangPage.Surface;
-  SourceList.Top := FromLabel.Top + FromLabel.Height + ScaleY(4);
-  SourceList.Width := LangPage.SurfaceWidth;
-  SourceList.Height := SizeLabel.Top - SourceList.Top - ScaleY(8);
-  for I := 0 to GetArrayLength(LangNames) - 1 do
-    SourceList.AddCheckBox(LangNames[I], '', 0, False, True, False, False, nil);
+  // Two columns of check boxes, indented from the page edge so they are never clipped.
+  SetArrayLength(SourceBoxes, GetArrayLength(LangCodes));
+  for I := 0 to GetArrayLength(LangCodes) - 1 do
+  begin
+    SourceBoxes[I] := TNewCheckBox.Create(LangPage);
+    SourceBoxes[I].Parent := LangPage.Surface;
+    SourceBoxes[I].Caption := LangNames[I];
+    SourceBoxes[I].Left := ScaleX(12) + (I mod 2) * (LangPage.SurfaceWidth div 2);
+    SourceBoxes[I].Top := FromLabel.Top + FromLabel.Height + ScaleY(8) + (I div 2) * ScaleY(24);
+    SourceBoxes[I].Width := LangPage.SurfaceWidth div 2 - ScaleX(16);
+    SourceBoxes[I].Height := ScaleY(20);
+    SourceBoxes[I].OnClick := @UpdateSize;
+  end;
 
   // Defaults: the previous choice when reinstalling; otherwise the Windows language as target,
   // and the Windows language, English and the target as languages to translate from.
@@ -374,10 +439,10 @@ begin
     Sources := WindowsLang + ',en,' + Target;
   TargetCombo.ItemIndex := LangIndex(Target);
   for I := 0 to GetArrayLength(LangCodes) - 1 do
-    SourceList.Checked[I] := InList(LangCodes[I], Sources) or (LangCodes[I] = Target);
+    SourceBoxes[I].Checked := InList(LangCodes[I], Sources) or (LangCodes[I] = Target);
+  ShowTarget;
 
   TargetCombo.OnChange := @TargetChanged;
-  SourceList.OnClickCheck := @UpdateSize;
   UpdateSize(nil);
 
   DownloadPage := CreateDownloadPage(CustomMessage('DownloadingLanguages'), CustomMessage('DownloadingLanguagesHint'), nil);

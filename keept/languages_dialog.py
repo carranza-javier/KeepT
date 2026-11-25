@@ -55,6 +55,7 @@ class LanguagesDialog(QDialog):
         lay.addWidget(buttons)
 
         self.target.currentIndexChanged.connect(self._target_changed)
+        self._show_target()
         self.update_size()
         self.resize(420, 0)
 
@@ -64,8 +65,17 @@ class LanguagesDialog(QDialog):
     def chosen_sources(self) -> list[str]:
         return [c for c, b in self.boxes.items() if b.isChecked()]
 
+    def _show_target(self) -> None:
+        """The target is shown checked, greyed out and marked: it needs no download."""
+        tgt = self.chosen_target()
+        for code, box in self.boxes.items():
+            box.setEnabled(code != tgt)
+            box.setText(i18n.lang_name(code) + (f" {i18n.tr('languages_target_mark')}" if code == tgt else ""))
+            if code == tgt:
+                box.setChecked(True)
+
     def _target_changed(self) -> None:
-        self.boxes[self.chosen_target()].setChecked(True)
+        self._show_target()
         self.update_size()
 
     def update_size(self) -> None:
