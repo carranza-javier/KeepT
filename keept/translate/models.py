@@ -1,8 +1,12 @@
-"""Argos Translate model packages: index, download, cache on disk and loading.
+"""OPUS-MT translation models: catalog, on demand download, local conversion and loading.
 
-The `argostranslate` package itself is not used (it pulls stanza and torch);
-an .argosmodel is a zip with a CTranslate2 model plus a SentencePiece or
-subword-nmt BPE tokenizer, which we load directly.
+Every language pair uses an OPUS-MT model (University of Helsinki, CC BY 4.0) listed in
+catalog.json (built by tools/build_model_catalog.py from the official OPUS-MT storage).
+Nothing is bundled: a model is downloaded the first time a pair is needed, converted on the
+user's machine to CTranslate2 int8 and kept in %LOCALAPPDATA%\\KeepT\\models.
+
+Text goes through the same steps as in the OPUS-MT training pipeline (preprocess.sh):
+Moses punctuation normalisation, then SentencePiece; output is decoded with SentencePiece.
 """
 
 from __future__ import annotations
@@ -17,31 +21,18 @@ import time
 import urllib.request
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Callable
 
 from ..paths import models_dir
 
 log = logging.getLogger(__name__)
 
-INDEX_URL = "https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json"
-# Used when the index cannot be fetched (links as published in the index on 2026-11-24).
-FALLBACK_LINKS = {
-    ("de", "en"): "https://argos-net.com/v1/translate-de_en-1_3.argosmodel",
-    ("en", "de"): "https://argos-net.com/v1/translate-en_de-1_3.argosmodel",
-    ("en", "es"): "https://argos-net.com/v1/translate-en_es-1_0.argosmodel",
-    ("es", "en"): "https://argos-net.com/v1/translate-es_en-1_9.argosmodel",
+CATALOG_FILE = Path(__file__).with_name("catalog.json")
+CATALOG: dict[tuple[str, str], dict] = {
+    tuple(k.split("-")): v for k, v in json.loads(CATALOG_FILE.read_text(encoding="utf-8")).items()
 }
-# Direct German <-> Spanish: OPUS-MT Tatoeba transformer-big (CC-BY 4.0, University of Helsinki),
-# downloaded from the official OPUS-MT storage and converted locally to CTranslate2 int8
-# (better than the pivot through English in our benchmark, see DECISIONS.md).
-MARIAN_MODELS = {
-    ("de", "es"): ("https://object.pouta.csc.fi/Tatoeba-MT-models/deu-spa/"
-                   "opusTCv20210807_transformer-big_2022-07-26.zip", "tc-big-2022-07-26"),
-    ("es", "de"): ("https://object.pouta.csc.fi/Tatoeba-MT-models/spa-deu/"
-                   "opusTCv20210807_transformer-big_2022-07-22.zip", "tc-big-2022-07-22"),
-}
-KNOWN_PAIRS = frozenset(FALLBACK_LINKS) | frozenset(MARIAN_MODELS)
+KNOWN_PAIRS = frozenset(CATALOG)
 USER_AGENT = "KeepT-model-downloader"
 MARKER = "keept.json"
 
@@ -49,7 +40,7 @@ Progress = Callable[[int, int], None]  # (bytes done, bytes total)
 
 
 class ModelError(Exception):
-    """Base error with a `kind` used to pick a human message: network, disk, corrupt."""
+    """Base error with a `kind` used to pick a human message: network, disk, corrupt, unavailable."""
 
     def __init__(self, kind: str, message: str):
         super().__init__(message)
@@ -62,7 +53,6 @@ class InstalledModel:
     tgt: str
     path: Path
     version: str
-    tokenizer: str  # "spm", "bpe" or "marian"
     size_bytes: int
 
 
@@ -71,8 +61,9 @@ def _dir_size(path: Path) -> int:
 
 
 class ModelStore:
-    def __init__(self, root: Path | None = None, opener=None):
+    def __init__(self, root: Path | None = None, opener=None, catalog: dict | None = None):
         self.root = Path(root) if root else models_dir()
+        self.catalog = CATALOG if catalog is None else catalog
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._open = opener or self._urlopen
@@ -87,22 +78,24 @@ class ModelStore:
         return self.root / f"{src}_{tgt}"
 
     def get(self, src: str, tgt: str) -> InstalledModel | None:
+        """The installed model for a pair, if it is the OPUS-MT model of the catalog.
+        Older installs (Argos packages, other versions) count as missing and are replaced."""
         d = self.pair_dir(src, tgt)
         try:
             meta = json.loads((d / MARKER).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        if not (d / "model" / "model.bin").exists():
+        spec = self.catalog.get((src, tgt))
+        if spec is None or meta.get("tokenizer") != "marian":
             return None
-        return InstalledModel(src, tgt, d, meta.get("version", "?"), meta.get("tokenizer", "spm"), int(meta.get("size", 0)))
+        if meta.get("url") not in (None, spec["url"]):
+            return None
+        if not (d / "model" / "model.bin").exists() or not (d / "source.spm").exists():
+            return None
+        return InstalledModel(src, tgt, d, meta.get("version", "?"), int(meta.get("size", 0)))
 
     def installed(self) -> list[InstalledModel]:
-        out = []
-        for src, tgt in sorted(KNOWN_PAIRS):
-            m = self.get(src, tgt)
-            if m:
-                out.append(m)
-        return out
+        return [m for m in (self.get(*p) for p in sorted(self.catalog)) if m]
 
     def delete(self, src: str, tgt: str) -> None:
         shutil.rmtree(self.pair_dir(src, tgt), ignore_errors=True)
@@ -115,37 +108,13 @@ class ModelStore:
         with self._locks_guard:
             return self._locks.setdefault(pair, threading.Lock())
 
-    # -- index -----------------------------------------------------------------
-    def resolve_link(self, src: str, tgt: str) -> tuple[str, str]:
-        """Return (url, version) for a pair, from the online index or the built in fallback."""
-        cache = self.root / "index.json"
-        index = None
-        try:
-            with self._open(INDEX_URL, 10.0) as resp:
-                index = json.loads(resp.read().decode("utf-8"))
-            self.root.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps(index), encoding="utf-8")
-        except Exception as exc:  # noqa: BLE001 - any network problem falls back
-            log.info("Model index not reachable (%s), using cached or built in links", exc)
-            try:
-                index = json.loads(cache.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                index = None
-        if isinstance(index, list):
-            for pkg in index:
-                if pkg.get("from_code") == src and pkg.get("to_code") == tgt:
-                    links = [l for l in pkg.get("links", []) if l.startswith("https://")]
-                    if links:
-                        return links[0], str(pkg.get("package_version", "?"))
-        if (src, tgt) in FALLBACK_LINKS:
-            return FALLBACK_LINKS[(src, tgt)], "fallback"
-        raise ModelError("unavailable", f"no model for {src}->{tgt}")
-
     # -- download --------------------------------------------------------------
     def ensure(self, src: str, tgt: str, progress: Progress | None = None) -> InstalledModel:
         existing = self.get(src, tgt)
         if existing:
             return existing
+        if (src, tgt) not in self.catalog:
+            raise ModelError("unavailable", f"no model for {src}->{tgt}")
         with self._lock((src, tgt)):
             existing = self.get(src, tgt)
             if existing:
@@ -163,8 +132,7 @@ class ModelStore:
                 self._progress.pop((src, tgt), None)
 
     def _download_and_install(self, src: str, tgt: str, progress: Progress | None) -> InstalledModel:
-        marian = (src, tgt) in MARIAN_MODELS
-        url, version = MARIAN_MODELS[(src, tgt)] if marian else self.resolve_link(src, tgt)
+        spec = self.catalog[(src, tgt)]
         try:
             self.root.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -174,11 +142,9 @@ class ModelStore:
         os.close(fd)
         tmp_zip = Path(tmp_name)
         try:
-            self._fetch(url, tmp_zip, progress)
-            log.info("Downloaded %s in %.1fs", url, time.perf_counter() - t0)
-            if marian:
-                return self._install_marian(tmp_zip, src, tgt, version)
-            return self._install_zip(tmp_zip, src, tgt, version)
+            self._fetch(spec["url"], tmp_zip, progress)
+            log.info("Downloaded %s in %.1fs", spec["url"], time.perf_counter() - t0)
+            return self._install(tmp_zip, src, tgt, spec)
         finally:
             tmp_zip.unlink(missing_ok=True)
 
@@ -205,63 +171,10 @@ class ModelStore:
         except ModelError:
             raise
         except OSError as exc:
-            kind = "disk" if isinstance(exc, (PermissionError,)) or getattr(exc, "errno", None) == 28 else "network"
+            kind = "disk" if isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 28 else "network"
             raise ModelError(kind, str(exc)) from exc
 
-    def _install_zip(self, zip_path: Path, src: str, tgt: str, version: str) -> InstalledModel:
-        final = self.pair_dir(src, tgt)
-        staging = Path(tempfile.mkdtemp(prefix=f".{src}_{tgt}-", dir=self.root))
-        try:
-            try:
-                zf = zipfile.ZipFile(zip_path)
-            except zipfile.BadZipFile as exc:
-                raise ModelError("corrupt", "downloaded file is not a valid model package") from exc
-            with zf:
-                names = zf.namelist()
-                bins = [n for n in names if n.endswith("model/model.bin")]
-                if not bins:
-                    raise ModelError("corrupt", "model.bin not found in package")
-                prefix = bins[0][: -len("model/model.bin")]
-                wanted = []
-                for name in names:
-                    if not name.startswith(prefix) or name.endswith("/"):
-                        continue
-                    rel = name[len(prefix):]
-                    if rel.startswith("model/") or rel in ("sentencepiece.model", "bpe.model", "metadata.json", "README.md"):
-                        wanted.append((name, rel))
-                for name, rel in wanted:
-                    rel_path = PurePosixPath(rel)
-                    if rel_path.is_absolute() or ".." in rel_path.parts:
-                        raise ModelError("corrupt", f"unsafe path in package: {name}")
-                    target = staging.joinpath(*rel_path.parts)
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with zf.open(name) as fsrc, open(target, "wb") as fdst:
-                        shutil.copyfileobj(fsrc, fdst, 1 << 20)
-            if (staging / "sentencepiece.model").exists():
-                tokenizer = "spm"
-            elif (staging / "bpe.model").exists():
-                tokenizer = "bpe"
-            else:
-                raise ModelError("corrupt", "no tokenizer in package")
-            size = _dir_size(staging)
-            (staging / MARKER).write_text(
-                json.dumps({"src": src, "tgt": tgt, "version": version, "tokenizer": tokenizer, "size": size}),
-                encoding="utf-8",
-            )
-            if final.exists():
-                shutil.rmtree(final, ignore_errors=True)
-            staging.rename(final)
-        except OSError as exc:
-            raise ModelError("disk", str(exc)) from exc
-        finally:
-            if staging.exists():
-                shutil.rmtree(staging, ignore_errors=True)
-        model = self.get(src, tgt)
-        assert model is not None
-        return model
-
-
-    def _install_marian(self, zip_path: Path, src: str, tgt: str, version: str) -> InstalledModel:
+    def _install(self, zip_path: Path, src: str, tgt: str, spec: dict) -> InstalledModel:
         """Extract an OPUS-MT Marian package and convert it to CTranslate2 int8."""
         final = self.pair_dir(src, tgt)
         staging = Path(tempfile.mkdtemp(prefix=f".{src}_{tgt}-", dir=self.root))
@@ -272,7 +185,8 @@ class ModelStore:
             except zipfile.BadZipFile as exc:
                 raise ModelError("corrupt", "downloaded file is not a valid model package") from exc
             with zf:
-                keep = [n for n in zf.namelist() if "/" not in n and (
+                # Only flat names: nothing can be written outside the staging folder.
+                keep = [n for n in zf.namelist() if "/" not in n and "\\" not in n and (
                     n.endswith((".npz", ".spm", "decoder.yml", ".vocab.yml")) or n in ("LICENSE", "README.md"))]
                 if not any(n.endswith(".npz") for n in keep) or "decoder.yml" not in keep:
                     raise ModelError("corrupt", "not an OPUS-MT package")
@@ -293,10 +207,10 @@ class ModelStore:
                     shutil.copy(raw / name, staging / name)
             shutil.rmtree(raw, ignore_errors=True)
             size = _dir_size(staging)
-            (staging / MARKER).write_text(
-                json.dumps({"src": src, "tgt": tgt, "version": version, "tokenizer": "marian", "size": size}),
-                encoding="utf-8",
-            )
+            (staging / MARKER).write_text(json.dumps({
+                "src": src, "tgt": tgt, "version": spec["version"], "url": spec["url"],
+                "tokenizer": "marian", "size": size,
+            }), encoding="utf-8")
             if final.exists():
                 shutil.rmtree(final, ignore_errors=True)
             staging.rename(final)
@@ -311,121 +225,35 @@ class ModelStore:
 
 
 # -- loading -------------------------------------------------------------------
-class SentencePieceTokenizer:
-    def __init__(self, path: Path):
-        import sentencepiece as spm
-
-        self._sp = spm.SentencePieceProcessor(model_file=str(path))
-
-    def encode(self, text: str) -> list[str]:
-        return self._sp.encode(text, out_type=str)
-
-    def decode(self, tokens: list[str]) -> str:
-        return self._sp.decode(tokens)
-
-
-class BPETokenizer:
-    """Moses tokenization + subword-nmt BPE, as used by OPUS-MT based Argos packages."""
-
-    def __init__(self, path: Path, src: str, tgt: str):
-        from sacremoses import MosesDetokenizer, MosesPunctNormalizer, MosesTokenizer
-        from subword_nmt.apply_bpe import BPE
-
-        with open(path, encoding="utf-8") as f:
-            self._bpe = BPE(f)
-        self._norm = MosesPunctNormalizer(src)
-        self._tok = MosesTokenizer(src)
-        self._detok = MosesDetokenizer(tgt)
-
-    def encode(self, text: str) -> list[str]:
-        tokens = self._tok.tokenize(self._norm.normalize(text), escape=True)
-        return self._bpe.segment_tokens(tokens)
-
-    def decode(self, tokens: list[str]) -> str:
-        return self._detok.detokenize(" ".join(tokens).replace("@@ ", "").split(" "))
-
-
-UNK = "<unk>"
-# Capital letters that some OPUS-MT vocabularies lack although the lowercase forms exist
-# (the de<->es transformer-big models have no Í, Ó, Ú or Ñ).
-_ACCENTED_CAPITALS = "ÚÍÓÑÁÉÜ"
-
-
-def load_vocabulary(model_dir: Path) -> set[str]:
-    for name in ("shared_vocabulary.json", "shared_vocabulary.txt", "target_vocabulary.json", "target_vocabulary.txt"):
-        path = model_dir / name
-        if path.exists():
-            text = path.read_text(encoding="utf-8")
-            return set(json.loads(text)) if name.endswith(".json") else set(text.split("\n"))
-    return set()
-
-
-def restore_unknowns(tokens: list[str], vocab: set[str], source: str) -> list[str]:
-    """Replace <unk> tokens the model produced for characters missing from its vocabulary.
-
-    The model knows *where* the character goes ("▁", <unk>, "ltimo" is "Último"), so:
-    1. at the start of a word, try the accented capitals whose lowercase form makes a
-       vocabulary word with the next piece ("▁último" -> "Ú");
-    2. otherwise use, in order, characters of the source text that the vocabulary lacks
-       (for example "–" in "CHF 250.–");
-    3. otherwise drop it.
-    """
-    vocab_chars = set("".join(vocab))
-    spare = [c for c in source if not c.isspace() and c not in vocab_chars]
-    prefixes = None
-    out: list[str] = []
-    for i, tok in enumerate(tokens):
-        if tok != UNK:
-            out.append(tok)
-            continue
-        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
-        word_start = not out or out[-1] == "▁" or out[-1].endswith(("▁", " "))
-        choice = ""
-        if word_start and nxt and not nxt.startswith("▁"):
-            for cap in _ACCENTED_CAPITALS:
-                low = "▁" + cap.lower() + nxt
-                if low in vocab:
-                    choice = cap
-                    break
-            if not choice:
-                if prefixes is None:
-                    prefixes = sorted(vocab)
-                import bisect
-
-                for cap in _ACCENTED_CAPITALS:
-                    stem = "▁" + cap.lower() + nxt
-                    j = bisect.bisect_left(prefixes, stem)
-                    if j < len(prefixes) and prefixes[j].startswith(stem):
-                        choice = cap
-                        break
-        if not choice and spare:
-            choice = spare.pop(0)
-        if choice:
-            out.append(choice)
-    return out
-
-
 class MarianTokenizer:
-    """OPUS-MT: separate SentencePiece models for source and target. The converted model
-    configuration appends the end of sentence token to the source itself."""
+    """The OPUS-MT pre and post processing: Moses punctuation normalisation of the source
+    (training data was normalised this way, so for example "–" never appears in the vocabulary
+    and must become "-"), SentencePiece with separate source and target models, an optional
+    target language label (">>por<<") and SentencePiece decoding of the output."""
 
-    def __init__(self, source: Path, target: Path):
+    def __init__(self, source: Path, target: Path, src_lang: str, target_label: str | None = None):
         import sentencepiece as spm
+        from sacremoses import MosesPunctNormalizer
 
         self._src = spm.SentencePieceProcessor(model_file=str(source))
         self._tgt = spm.SentencePieceProcessor(model_file=str(target))
+        self._norm = MosesPunctNormalizer(lang=src_lang, pre_replace_unicode_punct=True,
+                                          post_remove_control_chars=True)
+        self._label = target_label
+
+    def normalize(self, text: str) -> str:
+        return self._norm.normalize(text).strip()
 
     def encode(self, text: str) -> list[str]:
-        return self._src.encode(text, out_type=str)
+        tokens = self._src.encode(self.normalize(text), out_type=str)
+        return [self._label, *tokens] if self._label else tokens
 
     def decode(self, tokens: list[str]) -> str:
-        # Plain join instead of SentencePiece decoding, so restored characters that are not in
-        # the vocabulary survive (SentencePiece would turn them back into an unknown marker).
-        return "".join(t for t in tokens if t != "</s>").replace("▁", " ").strip()
+        return self._tgt.decode([t for t in tokens if t != "</s>"])
 
 
 class LoadedModel:
-    def __init__(self, info: InstalledModel, threads: int):
+    def __init__(self, info: InstalledModel, threads: int, target_label: str | None = None):
         import ctranslate2
 
         t0 = time.perf_counter()
@@ -433,14 +261,7 @@ class LoadedModel:
         self.translator = ctranslate2.Translator(
             str(info.path / "model"), device="cpu", compute_type="int8", inter_threads=1, intra_threads=threads
         )
-        self.vocab: set[str] | None = None
-        if info.tokenizer == "marian":
-            self.tokenizer = MarianTokenizer(info.path / "source.spm", info.path / "target.spm")
-            self.vocab = load_vocabulary(info.path / "model")
-        elif info.tokenizer == "bpe":
-            self.tokenizer = BPETokenizer(info.path / "bpe.model", info.src, info.tgt)
-        else:
-            self.tokenizer = SentencePieceTokenizer(info.path / "sentencepiece.model")
+        self.tokenizer = MarianTokenizer(info.path / "source.spm", info.path / "target.spm", info.src, target_label)
         log.info("Loaded model %s->%s in %.2fs", info.src, info.tgt, time.perf_counter() - t0)
 
     def translate(self, sentences: list[str], beam_size: int = 2) -> list[str]:
@@ -454,11 +275,9 @@ class LoadedModel:
             max_batch_size=32,
             max_decoding_length=min(512, int(longest * 2.5) + 16),
             repetition_penalty=1.05,
-            # Marian models: let the model mark missing characters and restore them below.
-            # Others: never produce the unknown marker.
-            disable_unk=self.vocab is None,
+            # Symbols outside the vocabulary (arrows, emoji...) must never print as "⁇". Letters
+            # of the target language are always in the vocabulary: the catalog only uses models
+            # whose vocabulary covers them (tools/build_model_catalog.py).
+            disable_unk=True,
         )
-        if self.vocab is not None:
-            return [self.tokenizer.decode(restore_unknowns(r.hypotheses[0], self.vocab, src))
-                    for r, src in zip(results, sentences)]
         return [self.tokenizer.decode(r.hypotheses[0]) for r in results]

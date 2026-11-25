@@ -78,7 +78,8 @@ class Translator:
 
     def _default_loader(self, src: str, tgt: str, progress: Progress | None) -> PairModel:
         info = self.store.ensure(src, tgt, progress)
-        return LoadedModel(info, self._threads)
+        label = self.store.catalog.get((src, tgt), {}).get("target_label")
+        return LoadedModel(info, self._threads, label)
 
     def is_pair_loaded(self, pair: tuple[str, str]) -> bool:
         return pair in self._models

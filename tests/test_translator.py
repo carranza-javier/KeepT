@@ -39,8 +39,9 @@ def test_route_direct_and_pivot():
     assert route("es", "en") == [("es", "en")]
     assert route("de", "es") == [("de", "es")]  # direct OPUS-MT model
     assert route("es", "de") == [("es", "de")]
-    argos_only = {("de", "en"), ("en", "de"), ("en", "es"), ("es", "en")}
-    assert route("de", "es", argos_only) == [("de", "en"), ("en", "es")]
+    english_only = {("de", "en"), ("en", "de"), ("en", "es"), ("es", "en")}
+    assert route("de", "es", english_only) == [("de", "en"), ("en", "es")]
+    assert route("pt", "es") == [("pt", "en"), ("en", "es")]  # no direct OPUS-MT model
     assert route("en", "en") == []
 
 
@@ -66,8 +67,8 @@ def test_translate_direct(translator):
 def test_translate_pivot_through_english(translator, monkeypatch):
     from keept.translate import translator as tmod
 
-    argos_only = frozenset({("de", "en"), ("en", "de"), ("en", "es"), ("es", "en")})
-    monkeypatch.setattr(tmod.route, "__defaults__", (argos_only,))
+    english_only = frozenset({("de", "en"), ("en", "de"), ("en", "es"), ("es", "en")})
+    monkeypatch.setattr(tmod.route, "__defaults__", (english_only,))
     out = translator.translate(["Hallo."], "de", "es")
     assert out == ["[en>es][de>en]Hallo."]
     assert set(translator.loaded) == {("de", "en"), ("en", "es")}
@@ -98,15 +99,16 @@ def test_match_case():
     assert match_case("Settings", "Ajustes") == "Ajustes"
 
 
-# -- model store -------------------------------------------------------------
-def make_package(prefix="translate-de_en-1_3/", tokenizer="sentencepiece.model", extra=None):
+# -- model store ---------------------------------------------------------------
+SPEC = {"url": "https://example.invalid/deu-eng/model.zip", "version": "test-1", "arch": "transformer",
+        "download_bytes": 10, "target_label": None, "source": "test"}
+
+
+def marian_package(extra=None):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr(prefix + "model/model.bin", b"bin")
-        zf.writestr(prefix + "model/config.json", b"{}")
-        zf.writestr(prefix + tokenizer, b"tok")
-        zf.writestr(prefix + "stanza/de/tokenize/gsd.pt", b"big")
-        zf.writestr(prefix + "metadata.json", b"{}")
+        for name in ("decoder.yml", "model.npz", "x.vocab.yml", "source.spm", "target.spm", "LICENSE", "train.log"):
+            zf.writestr(name, b"data")
         for name, data in (extra or {}).items():
             zf.writestr(name, data)
     return buf.getvalue()
@@ -124,77 +126,17 @@ class FakeResponse(io.BytesIO):
         self.close()
 
 
-def fake_opener(package, index=None):
-    index = index if index is not None else [
-        {"from_code": "de", "to_code": "en", "package_version": "1.3", "links": ["https://example.invalid/de_en.argosmodel"]}
-    ]
-
+def opener_for(package, calls=None):
     def opener(url, timeout=0):
-        if url.endswith("index.json"):
-            return FakeResponse(json.dumps(index).encode())
+        if calls is not None:
+            calls.append(url)
         return FakeResponse(package)
 
     return opener
 
 
-def test_store_installs_package_without_stanza(tmp_path):
-    store = ModelStore(tmp_path, opener=fake_opener(make_package()))
-    progress = []
-    info = store.ensure("de", "en", lambda done, total: progress.append((done, total)))
-    assert info.tokenizer == "spm" and info.version == "1.3"
-    assert (info.path / "model" / "model.bin").read_bytes() == b"bin"
-    assert not (info.path / "stanza").exists()
-    assert progress and progress[-1][0] == progress[-1][1]
-    assert [m.src + m.tgt for m in store.installed()] == ["deen"]
-    store.delete("de", "en")
-    assert store.get("de", "en") is None
-
-
-def test_store_detects_bpe_tokenizer(tmp_path):
-    store = ModelStore(tmp_path, opener=fake_opener(make_package("en_es/", "bpe.model")))
-    assert store.ensure("de", "en").tokenizer == "bpe"
-
-
-def test_store_rejects_corrupt_download(tmp_path):
-    store = ModelStore(tmp_path, opener=fake_opener(b"not a zip"))
-    with pytest.raises(ModelError) as err:
-        store.ensure("de", "en")
-    assert err.value.kind == "corrupt"
-    assert store.get("de", "en") is None
-    assert not any(p.name.endswith(".part") for p in tmp_path.iterdir())
-
-
-def test_store_rejects_path_traversal(tmp_path):
-    pkg = make_package(prefix="", extra={"model/../../evil.txt": b"x"})
-    store = ModelStore(tmp_path / "models", opener=fake_opener(pkg))
-    with pytest.raises(ModelError):
-        store.ensure("de", "en")
-    assert not (tmp_path / "evil.txt").exists()
-
-
-def test_store_falls_back_to_builtin_links(tmp_path):
-    calls = []
-
-    def opener(url, timeout=0):
-        calls.append(url)
-        if url.endswith("index.json"):
-            raise OSError("offline")
-        return FakeResponse(make_package())
-
-    ModelStore(tmp_path, opener=opener).ensure("de", "en")
-    assert calls[-1] == "https://argos-net.com/v1/translate-de_en-1_3.argosmodel"
-
-
-def test_network_error_is_reported_as_network(tmp_path):
-    def opener(url, timeout=0):
-        raise OSError("no route to host")
-
-    with pytest.raises(ModelError) as err:
-        ModelStore(tmp_path, opener=opener).ensure("de", "en")
-    assert err.value.kind == "network"
-
-
-def test_store_installs_marian_package_with_local_conversion(tmp_path, monkeypatch):
+@pytest.fixture
+def fake_converter(monkeypatch):
     import ctranslate2.converters.opus_mt as opus_mt
 
     class FakeConverter:
@@ -208,21 +150,66 @@ def test_store_installs_marian_package_with_local_conversion(tmp_path, monkeypat
             (Path(out) / "model.bin").write_bytes(b"ct2")
 
     monkeypatch.setattr(opus_mt, "OpusMTConverter", FakeConverter)
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for name in ("decoder.yml", "model.npz", "x.vocab.yml", "source.spm", "target.spm", "LICENSE", "train.log"):
-            zf.writestr(name, b"data")
-    store = ModelStore(tmp_path, opener=fake_opener(buf.getvalue()))
-    info = store.ensure("de", "es")
-    assert info.tokenizer == "marian" and info.version.startswith("tc-big")
+
+
+def test_store_installs_and_converts_opus_mt_package(tmp_path, fake_converter):
+    calls = []
+    store = ModelStore(tmp_path, opener=opener_for(marian_package(), calls), catalog={("de", "en"): SPEC})
+    progress = []
+    info = store.ensure("de", "en", lambda done, total: progress.append((done, total)))
+    assert calls == [SPEC["url"]]
+    assert info.version == "test-1"
     assert (info.path / "model" / "model.bin").read_bytes() == b"ct2"
     assert (info.path / "source.spm").exists() and (info.path / "LICENSE").exists()
     assert not (info.path / "marian").exists() and not (info.path / "train.log").exists()
+    assert progress and progress[-1][0] == progress[-1][1]
+    assert [m.src + m.tgt for m in store.installed()] == ["deen"]
+    store.delete("de", "en")
+    assert store.get("de", "en") is None
 
 
-def test_download_progress_is_visible_to_other_threads(tmp_path):
+def test_old_argos_install_counts_as_missing(tmp_path):
+    d = tmp_path / "de_en"
+    (d / "model").mkdir(parents=True)
+    (d / "model" / "model.bin").write_bytes(b"x")
+    (d / "keept.json").write_text(json.dumps({"tokenizer": "spm", "version": "1.3"}), encoding="utf-8")
+    store = ModelStore(tmp_path, catalog={("de", "en"): SPEC})
+    assert store.get("de", "en") is None
+
+
+def test_unknown_pair_is_unavailable(tmp_path):
+    with pytest.raises(ModelError) as err:
+        ModelStore(tmp_path, catalog={}).ensure("pt", "pl")
+    assert err.value.kind == "unavailable"
+
+
+def test_store_rejects_corrupt_download(tmp_path):
+    store = ModelStore(tmp_path, opener=opener_for(b"not a zip"), catalog={("de", "en"): SPEC})
+    with pytest.raises(ModelError) as err:
+        store.ensure("de", "en")
+    assert err.value.kind == "corrupt"
+    assert store.get("de", "en") is None
+    assert not any(p.name.endswith(".part") for p in tmp_path.iterdir())
+
+
+def test_store_ignores_paths_outside_the_package(tmp_path, fake_converter):
+    pkg = marian_package(extra={"../../evil.txt": b"x", "sub/../../evil2.txt": b"x"})
+    store = ModelStore(tmp_path / "models", opener=opener_for(pkg), catalog={("de", "en"): SPEC})
+    store.ensure("de", "en")
+    assert not (tmp_path / "evil.txt").exists() and not (tmp_path / "evil2.txt").exists()
+
+
+def test_network_error_is_reported_as_network(tmp_path):
+    def opener(url, timeout=0):
+        raise OSError("no route to host")
+
+    with pytest.raises(ModelError) as err:
+        ModelStore(tmp_path, opener=opener, catalog={("de", "en"): SPEC}).ensure("de", "en")
+    assert err.value.kind == "network"
+
+
+def test_download_progress_is_visible_to_other_threads(tmp_path, fake_converter):
     seen = []
-    package = make_package()
     store_ref = {}
 
     class Spy(FakeResponse):
@@ -230,35 +217,65 @@ def test_download_progress_is_visible_to_other_threads(tmp_path):
             seen.append(store_ref["s"].download_progress("de", "en"))
             return super().read(n)
 
-    def opener(url, timeout=0):
-        if url.endswith("index.json"):
-            return FakeResponse(json.dumps([]).encode())
-        return Spy(package)
-
-    store = ModelStore(tmp_path, opener=opener)
+    store = ModelStore(tmp_path, opener=lambda url, timeout=0: Spy(marian_package()), catalog={("de", "en"): SPEC})
     store_ref["s"] = store
     store.ensure("de", "en")
     assert seen and all(s is not None for s in seen)
     assert store.download_progress("de", "en") is None
 
 
-def test_restore_unknown_accented_capital():
-    from keept.translate.models import restore_unknowns
+def test_catalog_covers_every_language_through_english():
+    from keept.languages import CODES
+    from keept.translate.models import CATALOG
 
-    vocab = {"▁último", "▁última", "ltimo", "ltima", "▁uso", "▁vez", "▁U", "▁", "▁CHF", "▁250", ".", "▁por", "▁mes"}
-    assert restore_unknowns(["▁", "<unk>", "ltimo", "▁uso"], vocab, "Zuletzt verwendet") == ["▁", "Ú", "ltimo", "▁uso"]
-    # a character of the source that the vocabulary lacks
-    out = restore_unknowns(["▁CHF", "▁250", ".", "<unk>", "▁por", "▁mes"], vocab, "CHF 250.– pro Monat")
-    assert out[3] == "–"
-    # nothing sensible: dropped
-    assert restore_unknowns(["▁uso", "<unk>"], vocab, "uso") == ["▁uso"]
+    for code in CODES:
+        if code != "en":
+            assert (code, "en") in CATALOG and ("en", code) in CATALOG
+    for src in CODES:
+        for tgt in CODES:
+            if src != tgt:
+                assert 1 <= len(route(src, tgt)) <= 2
 
 
-def test_marian_decode_keeps_restored_characters():
+# -- OPUS-MT pre and post processing (no model download needed) -----------------
+@pytest.fixture(scope="module")
+def tiny_spm(tmp_path_factory):
+    import sentencepiece as spm
+
+    d = tmp_path_factory.mktemp("spm")
+    corpus = d / "corpus.txt"
+    lines = ["Último acceso al índice", "Índice de la única versión", "Única opción disponible",
+             "Ñandú y niño en España", "El precio es de 250.- francos", "Gastos adicionales por mes",
+             "Die Nebenkosten betragen 250.- Franken pro Monat", "Zuletzt verwendet am Montag"] * 20
+    corpus.write_text("\n".join(lines), encoding="utf-8")
+    spm.SentencePieceTrainer.train(input=str(corpus), model_prefix=str(d / "m"), vocab_size=60,
+                                   character_coverage=1.0, model_type="unigram", minloglevel=2)
+    return d / "m.model"
+
+
+def test_marian_decoding_keeps_accented_capitals(tiny_spm):
     from keept.translate.models import MarianTokenizer
 
-    tok = MarianTokenizer.__new__(MarianTokenizer)
-    assert tok.decode(["▁", "Ú", "ltimo", "▁uso", "</s>"]) == "Último uso"
+    tok = MarianTokenizer(tiny_spm, tiny_spm, "es")
+    text = "Último Índice Única Ñandú"
+    pieces = tok.encode(text)
+    assert tok.decode(pieces + ["</s>"]) == text
+
+
+def test_marian_source_is_moses_normalised_like_in_training(tiny_spm):
+    from keept.translate.models import MarianTokenizer
+
+    tok = MarianTokenizer(tiny_spm, tiny_spm, "de")
+    # The OPUS-MT training data went through normalize-punctuation.perl: "–" became "-".
+    assert tok.normalize("CHF 250.– pro Monat") == "CHF 250.- pro Monat"
+    assert tok.normalize("„Hallo“ – sagte er") == '"Hallo" - sagte er'
+
+
+def test_marian_target_label_is_prepended(tiny_spm):
+    from keept.translate.models import MarianTokenizer
+
+    tok = MarianTokenizer(tiny_spm, tiny_spm, "fr", target_label=">>por<<")
+    assert tok.encode("Único")[0] == ">>por<<"
 
 
 def test_sentences_are_nfc_normalised():
