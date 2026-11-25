@@ -345,6 +345,66 @@ class BPETokenizer:
         return self._detok.detokenize(" ".join(tokens).replace("@@ ", "").split(" "))
 
 
+UNK = "<unk>"
+# Capital letters that some OPUS-MT vocabularies lack although the lowercase forms exist
+# (the de<->es transformer-big models have no Í, Ó, Ú or Ñ).
+_ACCENTED_CAPITALS = "ÚÍÓÑÁÉÜ"
+
+
+def load_vocabulary(model_dir: Path) -> set[str]:
+    for name in ("shared_vocabulary.json", "shared_vocabulary.txt", "target_vocabulary.json", "target_vocabulary.txt"):
+        path = model_dir / name
+        if path.exists():
+            text = path.read_text(encoding="utf-8")
+            return set(json.loads(text)) if name.endswith(".json") else set(text.split("\n"))
+    return set()
+
+
+def restore_unknowns(tokens: list[str], vocab: set[str], source: str) -> list[str]:
+    """Replace <unk> tokens the model produced for characters missing from its vocabulary.
+
+    The model knows *where* the character goes ("▁", <unk>, "ltimo" is "Último"), so:
+    1. at the start of a word, try the accented capitals whose lowercase form makes a
+       vocabulary word with the next piece ("▁último" -> "Ú");
+    2. otherwise use, in order, characters of the source text that the vocabulary lacks
+       (for example "–" in "CHF 250.–");
+    3. otherwise drop it.
+    """
+    vocab_chars = set("".join(vocab))
+    spare = [c for c in source if not c.isspace() and c not in vocab_chars]
+    prefixes = None
+    out: list[str] = []
+    for i, tok in enumerate(tokens):
+        if tok != UNK:
+            out.append(tok)
+            continue
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
+        word_start = not out or out[-1] == "▁" or out[-1].endswith(("▁", " "))
+        choice = ""
+        if word_start and nxt and not nxt.startswith("▁"):
+            for cap in _ACCENTED_CAPITALS:
+                low = "▁" + cap.lower() + nxt
+                if low in vocab:
+                    choice = cap
+                    break
+            if not choice:
+                if prefixes is None:
+                    prefixes = sorted(vocab)
+                import bisect
+
+                for cap in _ACCENTED_CAPITALS:
+                    stem = "▁" + cap.lower() + nxt
+                    j = bisect.bisect_left(prefixes, stem)
+                    if j < len(prefixes) and prefixes[j].startswith(stem):
+                        choice = cap
+                        break
+        if not choice and spare:
+            choice = spare.pop(0)
+        if choice:
+            out.append(choice)
+    return out
+
+
 class MarianTokenizer:
     """OPUS-MT: separate SentencePiece models for source and target. The converted model
     configuration appends the end of sentence token to the source itself."""
@@ -359,7 +419,9 @@ class MarianTokenizer:
         return self._src.encode(text, out_type=str)
 
     def decode(self, tokens: list[str]) -> str:
-        return self._tgt.decode([t for t in tokens if t != "</s>"])
+        # Plain join instead of SentencePiece decoding, so restored characters that are not in
+        # the vocabulary survive (SentencePiece would turn them back into an unknown marker).
+        return "".join(t for t in tokens if t != "</s>").replace("▁", " ").strip()
 
 
 class LoadedModel:
@@ -371,8 +433,10 @@ class LoadedModel:
         self.translator = ctranslate2.Translator(
             str(info.path / "model"), device="cpu", compute_type="int8", inter_threads=1, intra_threads=threads
         )
+        self.vocab: set[str] | None = None
         if info.tokenizer == "marian":
             self.tokenizer = MarianTokenizer(info.path / "source.spm", info.path / "target.spm")
+            self.vocab = load_vocabulary(info.path / "model")
         elif info.tokenizer == "bpe":
             self.tokenizer = BPETokenizer(info.path / "bpe.model", info.src, info.tgt)
         else:
@@ -390,6 +454,11 @@ class LoadedModel:
             max_batch_size=32,
             max_decoding_length=min(512, int(longest * 2.5) + 16),
             repetition_penalty=1.05,
-            disable_unk=True,  # never print the unknown token marker for characters outside the vocabulary
+            # Marian models: let the model mark missing characters and restore them below.
+            # Others: never produce the unknown marker.
+            disable_unk=self.vocab is None,
         )
+        if self.vocab is not None:
+            return [self.tokenizer.decode(restore_unknowns(r.hypotheses[0], self.vocab, src))
+                    for r, src in zip(results, sentences)]
         return [self.tokenizer.decode(r.hypotheses[0]) for r in results]

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import threading
+import unicodedata
 import time
 from typing import Callable, Protocol
 
@@ -21,7 +22,8 @@ _SENT_END = re.compile(r"(?<=[.!?…:])\s+(?=[\"'“„«¿¡(\[]?[A-ZÄÖÜÁÉ
 
 
 def split_sentences(text: str) -> list[str]:
-    text = " ".join(text.split())
+    # NFC: models are trained on composed characters; OCR or apps may hand us decomposed ones.
+    text = unicodedata.normalize("NFC", " ".join(text.split()))
     if not text:
         return []
     parts: list[str] = []
@@ -121,7 +123,7 @@ class Translator:
                 model = self.model(pair, progress)
                 current = self._translate_pair(model, current)
             for i, result in zip(todo, current):
-                result = match_case(texts[i], result)
+                result = match_case(texts[i], unicodedata.normalize("NFC", result))
                 self._cache[(texts[i], src, tgt)] = result
                 out[i] = result
             log.debug("Translated %d texts %s->%s in %.0f ms", len(todo), src, tgt, (time.perf_counter() - t0) * 1000)

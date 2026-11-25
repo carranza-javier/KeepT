@@ -240,3 +240,29 @@ def test_download_progress_is_visible_to_other_threads(tmp_path):
     store.ensure("de", "en")
     assert seen and all(s is not None for s in seen)
     assert store.download_progress("de", "en") is None
+
+
+def test_restore_unknown_accented_capital():
+    from keept.translate.models import restore_unknowns
+
+    vocab = {"▁último", "▁última", "ltimo", "ltima", "▁uso", "▁vez", "▁U", "▁", "▁CHF", "▁250", ".", "▁por", "▁mes"}
+    assert restore_unknowns(["▁", "<unk>", "ltimo", "▁uso"], vocab, "Zuletzt verwendet") == ["▁", "Ú", "ltimo", "▁uso"]
+    # a character of the source that the vocabulary lacks
+    out = restore_unknowns(["▁CHF", "▁250", ".", "<unk>", "▁por", "▁mes"], vocab, "CHF 250.– pro Monat")
+    assert out[3] == "–"
+    # nothing sensible: dropped
+    assert restore_unknowns(["▁uso", "<unk>"], vocab, "uso") == ["▁uso"]
+
+
+def test_marian_decode_keeps_restored_characters():
+    from keept.translate.models import MarianTokenizer
+
+    tok = MarianTokenizer.__new__(MarianTokenizer)
+    assert tok.decode(["▁", "Ú", "ltimo", "▁uso", "</s>"]) == "Último uso"
+
+
+def test_sentences_are_nfc_normalised():
+    import unicodedata
+
+    decomposed = unicodedata.normalize("NFD", "Inténtalo más tarde.")
+    assert split_sentences(decomposed) == ["Inténtalo más tarde."]
