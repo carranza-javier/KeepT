@@ -32,6 +32,21 @@ def render_icon(size: int) -> QImage:
     return img
 
 
+_cache: dict[int, QImage] = {}
+
+
+def paint_app_icon(p: QPainter, r: QRectF, color: QColor | None = None) -> None:
+    """Draw the app icon inside `r` (pill buttons, welcome pill), rendered at the device's real
+    pixel size so it stays sharp at 125 % or 150 %. `color` is ignored: the icon keeps its colours."""
+    dpr = p.device().devicePixelRatioF() if p.device() is not None else 1.0
+    px = max(8, round(min(r.width(), r.height()) * dpr))
+    img = _cache.get(px)
+    if img is None:
+        img = _cache[px] = render_icon(px)
+    side = px / dpr
+    p.drawImage(QRectF(r.center().x() - side / 2, r.center().y() - side / 2, side, side), img)
+
+
 def app_icon() -> QIcon:
     icon = QIcon()
     for s in SIZES:

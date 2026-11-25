@@ -280,18 +280,6 @@ def paint_shimmer(p: QPainter, rect: QRectF, radius: float, bg: QColor, elapsed_
 
 
 # -- icons (drawn, so they follow the theme colour and DPI) ---------------------
-def icon_sparkle(p: QPainter, r: QRectF, color: QColor) -> None:
-    c = r.center()
-    s = min(r.width(), r.height()) / 2
-    path = QPainterPath()
-    path.moveTo(c.x(), c.y() - s)
-    path.quadTo(c.x() + s * 0.12, c.y() - s * 0.12, c.x() + s, c.y())
-    path.quadTo(c.x() + s * 0.12, c.y() + s * 0.12, c.x(), c.y() + s)
-    path.quadTo(c.x() - s * 0.12, c.y() + s * 0.12, c.x() - s, c.y())
-    path.quadTo(c.x() - s * 0.12, c.y() - s * 0.12, c.x(), c.y() - s)
-    p.fillPath(path, QBrush(brand_gradient(r)))
-
-
 def icon_copy(p: QPainter, r: QRectF, color: QColor) -> None:
     s = min(r.width(), r.height())
     pen = QPen(color, max(1.2, s * 0.09))

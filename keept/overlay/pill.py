@@ -9,6 +9,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QFontDatabase, QFontMetricsF, Q
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from .. import i18n
+from ..icon import paint_app_icon
 from . import effects
 
 SHADOW = 14  # logical px around the pill reserved for the soft shadow
@@ -169,7 +170,7 @@ class Pill(QWidget):
         self._timer.timeout.connect(self._end_message)
 
         t = self.theme
-        self.btn_translate = PillButton(t, i18n.tr("translate_screen"), effects.icon_sparkle, bold=True)
+        self.btn_translate = PillButton(t, i18n.tr("translate_screen"), paint_app_icon, bold=True)
         self.btn_lang = PillButton(t, "", None, trailing=effects.icon_chevron)
         self.sep = Separator(t)
         self.btn_copy = PillButton(t, i18n.tr("copy"), effects.icon_copy)

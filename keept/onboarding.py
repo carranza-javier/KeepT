@@ -11,6 +11,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QPainte
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from . import i18n
+from .icon import paint_app_icon
 from .overlay import effects
 from .overlay.pill import SHADOW, PillButton, Separator, Theme, ui_font
 
@@ -20,7 +21,7 @@ ENDONYMS = tuple((lang.code, lang.native) for lang in LANGUAGES.values())
 
 
 class _Label(QWidget):
-    """Title with the sparkle icon and, optionally, a smaller clickable line below it."""
+    """Title with the app icon and, optionally, a smaller clickable line below it."""
 
     clicked_hint = Signal()
 
@@ -49,7 +50,7 @@ class _Label(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         h = self.height()
         title_h = 30 if self.hint else h
-        effects.icon_sparkle(p, QRectF(14, (title_h - 18) / 2 + (3 if self.hint else 0), 18, 18), self.theme.text)
+        paint_app_icon(p, QRectF(13, (title_h - 20) / 2 + (3 if self.hint else 0), 20, 20))
         p.setFont(self.font)
         p.setPen(self.theme.text)
         p.drawText(QRectF(42, 3 if self.hint else 0, self.width() - 42, title_h), Qt.AlignVCenter | Qt.AlignLeft,
