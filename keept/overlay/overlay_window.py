@@ -10,6 +10,7 @@ them, which keeps coordinates exact at 100 %, 125 %, 150 % and on any monitor.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -36,6 +37,18 @@ GLOW_PX = 8.0  # logical
 STROKE_PX = 4.0  # logical
 MIN_TEXT_PX = 10.0  # logical, smallest legible translated text
 FADE_MS = 220.0
+
+
+_UNTRANSLATABLE = re.compile(
+    r"[\w\-.~()\[\]]+\.[A-Za-z0-9]{1,5}"  # file names: report.pdf, requirements.txt
+    r"|(?:https?://|www\.)\S+"  # URLs
+    r"|[\w.+-]+@[\w-]+\.[\w.-]+"  # e-mail addresses
+)
+
+
+def looks_untranslatable(text: str) -> bool:
+    """File names, URLs and e-mail addresses are left as they are."""
+    return bool(_UNTRANSLATABLE.fullmatch(text.strip()))
 
 
 class State(Enum):
@@ -429,7 +442,7 @@ class OverlayWindow(QWidget):
             new.append(self._make_item(b))
         if not new:
             return
-        todo = [it for it in new if (it.block.lang or self.screen_lang) != tgt]
+        todo = [it for it in new if (it.block.lang or self.screen_lang) != tgt and not looks_untranslatable(it.block.text)]
         if not todo:
             if not any(it.status == "done" for it in self.items.values()):
                 self.pill.show_message(i18n.tr("already_in", lang=i18n.lang_name(tgt)), 2500)

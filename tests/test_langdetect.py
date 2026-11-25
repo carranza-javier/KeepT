@@ -54,3 +54,9 @@ def test_no_letters():
 def test_probability_range():
     lang, p = detect("The file could not be saved and the application will close now.")
     assert lang == "en" and 0.5 < p <= 1.0
+
+
+def test_short_names_stay_in_the_screen_language():
+    # Folder names in a German Explorer window must not switch to another language.
+    for name in ("Bulería", "SERCLE", "YTB", "Lumis Kaffeebar", "Konzert Februar"):
+        assert detect(name, prior="de")[0] == "de", name

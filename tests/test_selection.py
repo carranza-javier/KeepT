@@ -86,3 +86,13 @@ def test_underline_stroke_selects_touched_line():
     stroke = [(100 + i * 10, 415) for i in range(0, 80)]
     sel = select_blocks(blocks, classify(stroke))
     assert [b.text for b in sel] == ["Button"]
+
+
+def test_file_names_urls_and_mail_are_not_translated():
+    from keept.overlay.overlay_window import looks_untranslatable
+
+    for text in ("requirements.txt", "KeepT.pyw", "Bericht_2026-11.pdf", "https://example.org/a",
+                 "www.sbb.ch", "info@example.ch"):
+        assert looks_untranslatable(text), text
+    for text in ("Dateiordner", "Release notes", "Version 2.5 ist da.", "Datei.  Weiter"):
+        assert not looks_untranslatable(text), text

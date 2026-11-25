@@ -15,6 +15,10 @@ from ..languages import CODES
 
 # The prior (screen language) wins when its probability is at least this fraction of the best.
 PRIOR_MARGIN = 0.3
+# Short labels (a few words, often names) only leave the screen language with strong evidence:
+# a wrong guess would download a model for a language that is not on the screen.
+SHORT_WORDS = 3
+SHORT_MIN_PROB = 0.9
 
 _identifier = None
 _lock = threading.Lock()
@@ -49,6 +53,8 @@ def detect(text: str, prior: str | None = None) -> tuple[str | None, float]:
         return (prior if prior in CODES else None), 0.0
     probs = scores(text)
     best = max(probs, key=probs.get)
-    if prior in probs and best != prior and probs[prior] >= probs[best] * PRIOR_MARGIN:
-        return prior, probs[prior]
+    if prior in probs and best != prior:
+        short = len(text.split()) <= SHORT_WORDS
+        if probs[prior] >= probs[best] * PRIOR_MARGIN or (short and probs[best] < SHORT_MIN_PROB):
+            return prior, probs[prior]
     return best, probs[best]
