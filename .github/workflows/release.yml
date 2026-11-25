@@ -143,7 +143,7 @@ jobs:
           $signed
 
           Built by GitHub Actions from commit ${{ github.sha }}.
-          Translation models are downloaded on first use from the models-v1 release (verified with SHA-256).
+          Translation models are downloaded from the models-v1 release (verified with SHA-256): during installation for the languages you choose, later only for languages you add.
           "@
           $notes | Out-File -Encoding utf8 notes.txt
           # 0.x is not stable yet: publish it as a pre-release (never marked as latest).
