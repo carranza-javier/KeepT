@@ -2,7 +2,10 @@
 ;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\keept.iss
 
 #define AppName "KeepT"
-#define AppVersion "1.0.0"
+; The release workflow passes the version of the tag: ISCC /DAppVersion=X.Y.Z
+#ifndef AppVersion
+  #define AppVersion "1.0.0"
+#endif
 #define AppExe "KeepT.exe"
 
 [Setup]
@@ -10,6 +13,14 @@ AppId={{6F2B7C1E-4B1A-4E8B-9C55-6B1E2A0D7A11}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=KeepT
+AppPublisherURL=https://github.com/carranza-javier/KeepT
+AppSupportURL=https://github.com/carranza-javier/KeepT/issues
+VersionInfoVersion={#AppVersion}
+VersionInfoProductName={#AppName}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoDescription=KeepT screen translator installer
+; Privacy notice shown before installing (what KeepT sends over the network and how to turn it off)
+InfoBeforeFile=..\packaging\privacy.txt
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -36,10 +47,14 @@ Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 en.Autostart=Start KeepT with Windows
 de.Autostart=KeepT mit Windows starten
 es.Autostart=Iniciar KeepT con Windows
+en.Updates=Check for new KeepT versions on GitHub (once a day)
+de.Updates=Einmal täglich auf GitHub nach neuen KeepT-Versionen suchen
+es.Updates=Buscar nuevas versiones de KeepT en GitHub (una vez al día)
 
 [Tasks]
 Name: "autostart"; Description: "{cm:Autostart}"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
+Name: "updates"; Description: "{cm:Updates}"
 
 [Files]
 Source: "..\dist\KeepT\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -51,6 +66,10 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; \
     ValueData: """{app}\{#AppExe}"" --autostart"; Flags: uninsdeletevalue; Tasks: autostart
+
+; The app reads this on its first start (afterwards the tray menu setting is used).
+Root: HKCU; Subkey: "Software\KeepT"; ValueType: dword; ValueName: "CheckUpdates"; ValueData: 1; Flags: uninsdeletekey; Tasks: updates
+Root: HKCU; Subkey: "Software\KeepT"; ValueType: dword; ValueName: "CheckUpdates"; ValueData: 0; Flags: uninsdeletekey; Tasks: not updates
 
 [Run]
 Filename: "{app}\{#AppExe}"; Flags: nowait postinstall skipifsilent

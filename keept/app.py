@@ -93,6 +93,9 @@ class KeepTApp:
             # The installer owns the initial "start with Windows" choice; afterwards the tray
             # toggle does. Here we only mirror the real state.
             self.config.autostart = plat.autostart_enabled()
+            choice = plat.installer_option("CheckUpdates")  # set by the installer, if it was used
+            if choice is not None:
+                self.config.check_updates = bool(choice)
             self.config.first_run_done = True
             self.config.save()
         self.prompt = None
@@ -460,6 +463,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--version"]:
+        if sys.stdout is not None:  # the windowed build may have no console
+            print(__version__)
+        return 0
     if argv[:1] == ["--convert-model"] and len(argv) >= 3:
         # Child process used to convert a downloaded model (see translate.models.convert_marian).
         from .translate.models import run_converter

@@ -1,6 +1,7 @@
 # PyInstaller spec for KeepT (one-folder build, starts faster than one-file).
 #   .venv\Scripts\pyinstaller packaging\keept.spec --noconfirm --distpath dist --workpath build
 
+import re
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
@@ -77,6 +78,18 @@ a.datas = [d for d in a.datas if keep(d)]
 
 pyz = PYZ(a.pure)
 
+# Version resource generated from keept.__version__, so every build carries the product name
+# and version of the release (required for signing with SignPath Foundation).
+_version = re.search(r'__version__ = "([^"]+)"', (ROOT / "keept" / "__init__.py").read_text()).group(1)
+_v4 = tuple(int(x) for x in _version.split(".")) + (0,)
+_version_file = Path(workpath) / "version_info.txt"
+_version_file.parent.mkdir(parents=True, exist_ok=True)
+_version_file.write_text(
+    (ROOT / "packaging" / "version_info.txt").read_text(encoding="utf-8")
+    .replace("(1, 0, 0, 0)", str(_v4)).replace("1.0.0", _version),
+    encoding="utf-8",
+)
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -86,7 +99,7 @@ exe = EXE(
     icon=str(ROOT / "packaging" / "keept.ico"),
     console=False,
     disable_windowed_traceback=False,
-    version=str(ROOT / "packaging" / "version_info.txt"),
+    version=str(_version_file),
     upx=False,
 )
 

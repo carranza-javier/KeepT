@@ -202,6 +202,14 @@ class WindowsServices:
         except OSError:
             return False
 
+    def installer_option(self, name: str):
+        """A DWORD written by the installer under HKCU\\Software\\KeepT, or None."""
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\KeepT") as k:
+                return winreg.QueryValueEx(k, name)[0]
+        except OSError:
+            return None
+
     def autostart_enabled(self) -> bool:
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as k:
