@@ -388,6 +388,10 @@ def selftest(image: str, target: str | None, out: str | None) -> int:
         report["target"] = tgt
         report["blocks"] = results
         report["ok"] = bool(results) and all(r["translation"] for r in results)
+        tr.unload_all()
+        from .ocr import release as release_ocr
+
+        release_ocr()
     except Exception as exc:  # noqa: BLE001
         log.exception("Selftest failed")
         report["ok"] = False
@@ -439,7 +443,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--convert-model"] and len(argv) >= 3:
+        # Child process used to convert a downloaded model (see translate.models.convert_marian).
+        from .translate.models import run_converter
+
+        return run_converter(argv[1], argv[2])
+    args = parse_args(argv)
     services().init_process()
     from .paths import setup_logging
 

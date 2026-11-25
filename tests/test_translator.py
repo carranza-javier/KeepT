@@ -137,19 +137,14 @@ def opener_for(package, calls=None):
 
 @pytest.fixture
 def fake_converter(monkeypatch):
-    import ctranslate2.converters.opus_mt as opus_mt
+    import keept.translate.models as models
 
-    class FakeConverter:
-        def __init__(self, src_dir):
-            self.src = Path(src_dir)
-            assert (self.src / "decoder.yml").exists() and (self.src / "model.npz").exists()
+    def convert(raw, out):
+        assert (Path(raw) / "decoder.yml").exists() and (Path(raw) / "model.npz").exists()
+        Path(out).mkdir(parents=True)
+        (Path(out) / "model.bin").write_bytes(b"ct2")
 
-        def convert(self, out, quantization, force):
-            assert quantization == "int8"
-            Path(out).mkdir(parents=True)
-            (Path(out) / "model.bin").write_bytes(b"ct2")
-
-    monkeypatch.setattr(opus_mt, "OpusMTConverter", FakeConverter)
+    monkeypatch.setattr(models, "convert_marian", convert)
 
 
 def test_store_installs_and_converts_opus_mt_package(tmp_path, fake_converter):
@@ -323,3 +318,12 @@ def test_download_resumes_after_a_dropped_connection(tmp_path, fake_converter, m
     info = store.ensure("de", "en")
     assert requests == [0, len(package) // 2]
     assert (info.path / "model" / "model.bin").exists()
+
+
+def test_conversion_failure_in_child_process_is_reported(tmp_path):
+    from keept.translate.models import convert_marian
+
+    (tmp_path / "raw").mkdir()  # not a Marian model: the child process must fail cleanly
+    with pytest.raises(ModelError) as err:
+        convert_marian(tmp_path / "raw", tmp_path / "out")
+    assert err.value.kind == "corrupt"

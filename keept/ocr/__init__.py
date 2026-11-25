@@ -34,3 +34,15 @@ def backend() -> OcrBackend:
         else:  # pragma: no cover
             raise NotImplementedError("OCR backend only implemented for Windows in v1")
     return _backend
+
+
+def release() -> None:
+    """Drop the OCR engines before the interpreter shuts down.
+
+    They are WinRT (COM) objects: if they are still alive during interpreter teardown, their
+    release runs after the WinRT runtime is gone and crashes the process at exit."""
+    global _backend
+    _backend = None
+    import gc
+
+    gc.collect()

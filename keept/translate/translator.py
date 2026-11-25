@@ -70,7 +70,10 @@ class Translator:
     def __init__(self, store: ModelStore | None = None, loader: Callable[[str, str, Progress | None], PairModel] | None = None):
         self.store = store or ModelStore()
         self._threads = max(1, min(8, (os.cpu_count() or 4) // 2))
-        self._loader = loader or self._default_loader
+        # Keep only an external loader here: storing the bound self._default_loader would create
+        # a reference cycle that kept every CTranslate2 model alive until the interpreter shut
+        # down, and freeing them that late crashed the process at exit.
+        self._loader = loader
         self._models: dict[tuple[str, str], PairModel] = {}
         self._load_lock = threading.Lock()
         self._run_lock = threading.Lock()
@@ -97,7 +100,7 @@ class Translator:
         with self._load_lock:
             m = self._models.get(pair)
             if m is None:
-                m = self._loader(pair[0], pair[1], progress)
+                m = (self._loader or self._default_loader)(pair[0], pair[1], progress)
                 self._models[pair] = m
         return m
 

@@ -273,7 +273,12 @@ class Engine(QObject):
 
     def shutdown(self) -> None:
         self.set_active(-1)
+        self.translator.unload_all()  # free CTranslate2 models now, not during interpreter teardown
         self._ocr_pool.shutdown(wait=False, cancel_futures=True)
         self._tr_pool.shutdown(wait=False, cancel_futures=True)
         self._dl_pool.shutdown(wait=False, cancel_futures=True)
         self._load_pool.shutdown(wait=False, cancel_futures=True)
+        self._ocr_pool.shutdown(wait=True, cancel_futures=True)
+        from .ocr import release as release_ocr
+
+        release_ocr()

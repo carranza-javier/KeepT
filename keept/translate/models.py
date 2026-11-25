@@ -212,12 +212,7 @@ class ModelStore:
                     with zf.open(name) as fsrc, open(raw / name, "wb") as fdst:
                         shutil.copyfileobj(fsrc, fdst, 1 << 20)
             t0 = time.perf_counter()
-            try:
-                from ctranslate2.converters.opus_mt import OpusMTConverter
-
-                OpusMTConverter(str(raw)).convert(str(staging / "model"), quantization="int8", force=True)
-            except Exception as exc:  # noqa: BLE001
-                raise ModelError("corrupt", f"conversion failed: {exc}") from exc
+            convert_marian(raw, staging / "model")
             log.info("Converted %s->%s to CTranslate2 int8 in %.1fs", src, tgt, time.perf_counter() - t0)
             for name in ("source.spm", "target.spm", "LICENSE", "README.md"):
                 if (raw / name).exists():
@@ -239,6 +234,45 @@ class ModelStore:
         model = self.get(src, tgt)
         assert model is not None
         return model
+
+
+def convert_marian(raw: Path, out: Path) -> None:
+    """Convert a Marian model to CTranslate2 int8 in a child process.
+
+    Converting in the app process left state behind that crashed the frozen app at exit, and
+    the conversion needs ~1.2 GB of RAM that a child process gives back right away."""
+    import subprocess
+    import sys
+
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "--convert-model", str(raw), str(out)]
+    else:
+        cmd = [sys.executable, "-m", "keept", "--convert-model", str(raw), str(out)]
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=900, creationflags=flags)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ModelError("corrupt", f"conversion failed: {exc}") from exc
+    if r.returncode != 0 or not (out / "model.bin").exists():
+        raise ModelError("corrupt", f"conversion failed ({r.returncode}): {(r.stderr or '')[-400:]}")
+
+
+def run_converter(raw: str, out: str) -> int:
+    """Entry point of the child process (KeepT --convert-model RAW OUT)."""
+    import os
+    import sys
+
+    try:
+        from ctranslate2.converters.opus_mt import OpusMTConverter
+
+        OpusMTConverter(raw).convert(out, quantization="int8", force=True)
+        code = 0
+    except Exception as exc:  # noqa: BLE001 - reported through the exit code and stderr
+        print(f"conversion failed: {exc!r}", file=sys.stderr)
+        code = 1
+    sys.stderr.flush()
+    sys.stdout.flush()
+    os._exit(code)  # skip interpreter teardown, the output is complete
 
 
 # -- loading -------------------------------------------------------------------
