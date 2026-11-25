@@ -4,7 +4,6 @@
 Then build the GIF with tools/make_gif.py (needs Pillow, a development only dependency).
 """
 
-import math
 import sys
 import time
 from pathlib import Path
@@ -46,18 +45,20 @@ def main() -> int:
     d.open()
     film(700)  # glow entry and pill
     d.wait_until(lambda: d.ov.ocr_done, 5000)
-    # circle the German paragraph with a hand drawn lasso
+    # drag a rectangle over the German paragraph with the mouse
     target = d.ov.blocks[2].rect
-    cx, cy, rx, ry = target.cx, target.cy, target.w / 2 + 40, target.h / 2 + 40
-    pts = [d.phys_to_logical(cx + rx * math.cos(2 * math.pi * i / 36 - 2.2) * (1 + 0.04 * math.sin(i)),
-                             cy + ry * math.sin(2 * math.pi * i / 36 - 2.2)) for i in range(40)]
-    d._mouse(QEvent.MouseButtonPress, pts[0], Qt.LeftButton, Qt.LeftButton, True)  # finger: lasso
+    x0, y0 = target.x - 30, target.y - 25
+    x1, y1 = target.x + target.w + 30, target.y + target.h + 25
+    steps = 22
+    pts = [d.phys_to_logical(x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * (k / steps) ** 0.9) for k in range(steps + 1)]
+    d._mouse(QEvent.MouseButtonPress, pts[0], Qt.LeftButton, Qt.LeftButton)
     for i, p in enumerate(pts[1:], 1):
-        d._mouse(QEvent.MouseMove, p, Qt.NoButton, Qt.LeftButton, True)
+        d._mouse(QEvent.MouseMove, p, Qt.NoButton, Qt.LeftButton)
         d.pump(12)
-        if i % 3 == 0:
+        if i % 2 == 0:
             frame(50)
-    d._mouse(QEvent.MouseButtonRelease, pts[-1], Qt.LeftButton, Qt.NoButton, True)
+    frame(250)
+    d._mouse(QEvent.MouseButtonRelease, pts[-1], Qt.LeftButton, Qt.NoButton)
     film(450, 75)  # shimmer and the translation fading in
     d.wait_until(d.translation_done, 20000)
     film(300, 100)

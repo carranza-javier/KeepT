@@ -5,7 +5,7 @@ reads the text locally and paints the translation right on top of the original, 
 place, with the same colours and size, like a lens. No windows to copy text into, no accounts,
 no API keys, and nothing leaves your PC.
 
-![KeepT: press the shortcut, circle a paragraph, the translation appears in place](docs/keept-demo.gif)
+![KeepT: press the shortcut, drag a rectangle over a paragraph, the translation appears in place](docs/keept-demo.gif)
 
 ## Download
 
