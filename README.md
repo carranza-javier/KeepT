@@ -120,3 +120,8 @@ Libraries bundled in the Windows build
 | PyInstaller bootloader | GPL-2.0 with bootloader exception |
 
 `tools/bench/benchmark_mt.py` compares candidate models on `tools/bench/sentences.json`.
+
+## License
+
+KeepT is released under the MIT License, see [LICENSE](LICENSE). Translation models and
+bundled libraries keep their own licenses (see "Credits and licenses" above).
