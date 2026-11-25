@@ -20,6 +20,8 @@ OLD_DEFAULT_HOTKEY = "Ctrl+Alt+T"  # default of the first builds
 class Config:
     hotkey: str = "F1"
     hotkey_chosen: bool = False  # the user picked the shortcut (otherwise it follows the default)
+    source_langs: list = None  # languages the user translates from (installer or tray "Languages")
+    installer_stamp: str = ""  # last language choice applied from the installer
     target_lang: str = ""  # empty means "use the Windows language"
     autostart: bool = True
     last_source_lang: str = "en"
@@ -37,6 +39,8 @@ class Config:
     def __post_init__(self):
         if self.ocr_warned is None:
             self.ocr_warned = []
+        if self.source_langs is None:
+            self.source_langs = []
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Config":

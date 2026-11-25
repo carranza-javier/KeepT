@@ -4,7 +4,7 @@ KeepT lit et traduit le texte de votre écran entièrement sur votre ordinateur.
 
 KeepT ne se connecte à Internet que pour deux choses :
 
-1. Télécharger les modèles de traduction, la première fois qu'une paire de langues est nécessaire. Ils proviennent de la version de KeepT sur GitHub (github.com/carranza-javier/KeepT, version "models-v1") ou, si GitHub est inaccessible, des serveurs officiels OPUS-MT de l'Université d'Helsinki (object.pouta.csc.fi). Seul le fichier du modèle est demandé.
+1. Télécharger les modèles de traduction : pendant cette installation pour les langues que vous choisissez, puis la première fois qu'une autre paire de langues est nécessaire. Ils proviennent de la version de KeepT sur GitHub (github.com/carranza-javier/KeepT, version "models-v1") ou, si GitHub est inaccessible, des serveurs officiels OPUS-MT de l'Université d'Helsinki (object.pouta.csc.fi). Seul le fichier du modèle est demandé.
 
 2. Rechercher de nouvelles versions de KeepT, au plus une fois par jour, en interrogeant l'API publique de GitHub. Aucune information sur vous ou sur votre écran n'est envoyée. Vous pouvez désactiver cette option à la page suivante de ce programme d'installation ou plus tard dans le menu de la zone de notification ("Rechercher les mises à jour").
 

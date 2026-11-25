@@ -4,7 +4,7 @@ KeepT legge e traduce il testo sullo schermo interamente sul tuo computer. Le sc
 
 KeepT si connette a Internet solo per due cose:
 
-1. Scaricare i modelli di traduzione, la prima volta che serve una coppia di lingue. Provengono dalla release di KeepT su GitHub (github.com/carranza-javier/KeepT, release "models-v1") oppure, se GitHub non è raggiungibile, dai server ufficiali OPUS-MT dell'Università di Helsinki (object.pouta.csc.fi). Viene richiesto solo il file del modello.
+1. Scaricare i modelli di traduzione: durante questa installazione per le lingue che scegli e, in seguito, la prima volta che serve un'altra coppia di lingue. Provengono dalla release di KeepT su GitHub (github.com/carranza-javier/KeepT, release "models-v1") oppure, se GitHub non è raggiungibile, dai server ufficiali OPUS-MT dell'Università di Helsinki (object.pouta.csc.fi). Viene richiesto solo il file del modello.
 
 2. Cercare nuove versioni di KeepT, al massimo una volta al giorno, interrogando l'API pubblica di GitHub. Non viene inviata alcuna informazione su di te o sul tuo schermo. Puoi disattivarlo nella pagina successiva di questo programma di installazione o in seguito nel menu dell'area di notifica ("Cerca aggiornamenti").
 

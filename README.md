@@ -17,7 +17,7 @@ Made by Javier Carranza · [KettenKI](https://kettenki.com)
 
 ## How to use
 
-On the first start KeepT asks which language to translate into, and you can change it at any time. Then press **`F1`**: the monitor under the mouse freezes with a glowing border while the text is read in the background.
+During installation you choose the language to translate into and the languages you read, and the installer downloads what they need (only this once), so the very first translation is instant. Then press **`F1`**: the monitor under the mouse freezes with a glowing border while the text is read in the background.
 
 | Action | Result |
 | --- | --- |
@@ -33,7 +33,7 @@ On the first start KeepT asks which language to translate into, and you can chan
 
 You can change the shortcut from the tray menu. On laptops where F1 is a media key, press `Fn+F1` or pick another shortcut. If F1 cannot be registered at all because another app holds it, KeepT switches to `Ctrl+Alt+T` and tells you.
 
-The tray menu also has the target language, start with Windows, the update check, the downloaded models and the credits.
+The tray menu also has the target language, "Languages" to add or remove languages later (with the download size), start with Windows, the update check, the downloaded models and the credits.
 
 ## Languages
 
@@ -41,7 +41,7 @@ KeepT translates between German, English, Spanish, French, Italian, Portuguese, 
 
 The app and the installer are also available in these eight languages. They follow the Windows display language and use English when Windows is in any other language.
 
-No model ships with KeepT. Each one (about 80 to 250 MB) is downloaded the first time it is needed: when you pick a target language, or the first time you translate text in a new language. Models are kept in `%LOCALAPPDATA%\KeepT\models` and can be deleted from the tray. After 10 minutes without use KeepT frees them from memory, and it reloads them in the background as soon as you press the shortcut.
+No model ships inside the installer. Each one (about 80 to 250 MB) is downloaded once: during installation for the languages you choose, from the tray "Languages" window, or the first time you translate text in another language, with the progress shown in the pill. Models are kept in `%LOCALAPPDATA%\KeepT\models` and can be deleted from the tray. After 10 minutes without use KeepT frees them from memory, and it reloads them in the background as soon as you press the shortcut.
 
 Text recognition uses the OCR built into Windows. If the OCR pack for a language is missing, KeepT tells you how to add it (Settings > Time & language > Language).
 
@@ -49,7 +49,7 @@ Text recognition uses the OCR built into Windows. If the OCR pack for a language
 
 Everything happens on your computer: screen captures, recognized text and translations never leave it. There are no accounts and no telemetry. KeepT only connects to the internet for two things:
 
-1. **Downloading translation models**, the first time a language pair is needed, from the [models-v1 release](https://github.com/carranza-javier/KeepT/releases/tag/models-v1) of this repository. Each file is verified with the SHA-256 pinned in the app and discarded if it does not match. Only if GitHub cannot be reached is the original model downloaded from the official OPUS-MT servers of the University of Helsinki and converted on your PC.
+1. **Downloading translation models**, during installation for the languages you choose and later the first time another language pair is needed, from the [models-v1 release](https://github.com/carranza-javier/KeepT/releases/tag/models-v1) of this repository. Each file is verified with the SHA-256 pinned in the app and discarded if it does not match. Only if GitHub cannot be reached is the original model downloaded from the official OPUS-MT servers of the University of Helsinki and converted on your PC.
 2. **Checking for a new version**, at most once a day, by reading the list of releases from the public GitHub API. Nothing about you or your screen is sent. KeepT only shows a notice with a link and never installs anything by itself. You can turn this off in the installer or in the tray menu.
 
 GitHub and the University of Helsinki may log these requests (for example your IP address) according to their own privacy policies.
@@ -90,7 +90,7 @@ These tools work without touching the real mouse or keyboard:
 ## Releases and models
 
 - **App releases** are built only by GitHub Actions. Pushing a tag `vX.Y.Z` that matches `keept/__init__.py` runs the tests, builds `KeepT.exe` with PyInstaller and the installer with Inno Setup on a Windows runner, and publishes them with their SHA-256 in a GitHub Release, as a pre-release while the version is 0.x. The SignPath signing steps are in the same workflow and stay off until the repository variable `SIGNPATH_ENABLED` is `true`.
-- **Translation models** live in the `models-v1` release. After changing `keept/translate/catalog.json` (built by `tools/build_model_catalog.py`), run the "Translation models" workflow from the Actions tab. `tools/publish_models.py` downloads the OPUS-MT originals, converts them to CTranslate2 int8 and uploads them with a `manifest.json` that lists the size and SHA-256 of each one. Commit the resulting `keept/translate/models_manifest.json` so the app pins the new hashes.
+- **Translation models** live in the `models-v1` release. After changing `keept/translate/catalog.json` (built by `tools/build_model_catalog.py`), run the "Translation models" workflow from the Actions tab. `tools/publish_models.py` downloads the OPUS-MT originals, converts them to CTranslate2 int8 and uploads them with a `manifest.json` that lists the size and SHA-256 of each one. Commit the resulting `keept/translate/models_manifest.json` so the app pins the new hashes, and run `tools/gen_installer_models.py` so the installer's language page uses the same packages, sizes and hashes.
 
 To build locally for testing (local builds are never signed or published):
 

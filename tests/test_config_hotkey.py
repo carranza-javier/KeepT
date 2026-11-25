@@ -129,3 +129,22 @@ def test_chosen_hotkey_failure_does_not_fall_back():
     app, rec = _fake_app(Config(hotkey="F1", hotkey_chosen=True))
     KeepTApp._on_hotkey_status(app, False, "F1")
     assert rec.registered == [] and app.hotkey_ok is False
+
+
+def test_installer_languages_are_applied_once():
+    from keept.app import apply_installer_languages
+
+    reg = {"TargetLang": "es", "SourceLangs": "de,en,xx", "LanguagesStamp": "20261125120000"}
+    cfg = Config()
+    cfg.save = lambda *a: None
+    assert apply_installer_languages(cfg, reg.get)
+    assert (cfg.target_lang, cfg.source_langs, cfg.target_chosen) == ("es", ["de", "en"], True)
+    # the same installation is not applied again (the user may have changed it in the tray)
+    cfg.target_lang = "fr"
+    assert not apply_installer_languages(cfg, reg.get)
+    assert cfg.target_lang == "fr"
+    # a new installation (new stamp) is
+    reg["LanguagesStamp"] = "20261201090000"
+    assert apply_installer_languages(cfg, reg.get) and cfg.target_lang == "es"
+    # nothing from the installer (silent install, run from source)
+    assert not apply_installer_languages(Config(), {}.get)

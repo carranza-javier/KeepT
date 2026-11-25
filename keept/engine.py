@@ -197,13 +197,9 @@ class Engine(QObject):
     @staticmethod
     def _pairs_for(tgt: str, sources) -> list[tuple[str, str]]:
         """Models needed to translate the given source languages into `tgt` (most likely first)."""
-        pairs: list[tuple[str, str]] = []
-        for s in sources:
-            if s and s != tgt:
-                for p in route(s, tgt):
-                    if p not in pairs:
-                        pairs.append(p)
-        return pairs
+        from .translate.setup_plan import needed_pairs
+
+        return needed_pairs(tgt, sources)
 
     def preload(self, tgt: str, download: bool, sources=("en",)) -> None:
         """Load the models to translate `sources` into `tgt`; with `download`, fetch the

@@ -419,3 +419,31 @@ def test_a_download_does_not_block_loading_another_pair():
     assert _time.perf_counter() - t0 < 1.0
     release.set()
     bg.join()
+
+
+def test_install_package_checks_the_manifest(tmp_path):
+    import hashlib
+    import zipfile
+
+    from keept.translate.models import ModelError, ModelStore
+
+    pkg = tmp_path / "en-es.zip"
+    with zipfile.ZipFile(pkg, "w") as zf:
+        zf.writestr("source.spm", b"spm")
+        zf.writestr("target.spm", b"spm")
+        zf.writestr("model/model.bin", b"bin")
+        zf.writestr("model/config.json", b"{}")
+    data = pkg.read_bytes()
+    url = "https://example/opus-en-es.zip"
+    catalog = {("en", "es"): {"url": url, "version": "x", "target_label": None}}
+    good = {"base_url": "", "models": {"en-es": {"file": "en-es.zip", "size": len(data),
+                                                 "sha256": hashlib.sha256(data).hexdigest(), "opus_url": url}}}
+    store = ModelStore(root=tmp_path / "models", catalog=catalog, manifest=good)
+    assert store.install_package(pkg, "en", "es").src == "en"
+    assert store.get("en", "es") is not None
+
+    bad = {"base_url": "", "models": {"en-es": dict(good["models"]["en-es"], sha256="0" * 64)}}
+    store2 = ModelStore(root=tmp_path / "models2", catalog=catalog, manifest=bad)
+    with pytest.raises(ModelError) as err:
+        store2.install_package(pkg, "en", "es")
+    assert err.value.kind == "integrity" and store2.get("en", "es") is None

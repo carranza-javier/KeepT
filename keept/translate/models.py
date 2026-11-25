@@ -17,6 +17,7 @@ Moses punctuation normalisation, then SentencePiece; output is decoded with Sent
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -184,6 +185,29 @@ class ModelStore:
             return self._install(tmp_zip, src, tgt, spec)
         finally:
             tmp_zip.unlink(missing_ok=True)
+
+    def install_package(self, zip_path: Path, src: str, tgt: str) -> InstalledModel:
+        """Install a model package downloaded by someone else (the installer), after checking
+        it against the manifest pinned in the app, exactly as an in-app download is checked."""
+        existing = self.get(src, tgt)
+        if existing:
+            return existing
+        spec = self.catalog.get((src, tgt))
+        entry = self.manifest.get("models", {}).get(f"{src}-{tgt}")
+        if spec is None or not entry or entry.get("opus_url") != spec["url"]:
+            raise ModelError("unavailable", f"no published package for {src}->{tgt}")
+        h = hashlib.sha256()
+        with open(zip_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != entry["sha256"] or zip_path.stat().st_size != entry["size"]:
+            raise ModelError("integrity", f"{zip_path.name} does not match the manifest")
+        try:
+            self.root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ModelError("disk", str(exc)) from exc
+        with self._lock((src, tgt)):
+            return self.get(src, tgt) or self._install_converted(zip_path, src, tgt, spec, entry)
 
     def _install_converted(self, zip_path: Path, src: str, tgt: str, spec: dict, entry: dict) -> InstalledModel:
         """Install a model package from the KeepT release (already CTranslate2 int8)."""

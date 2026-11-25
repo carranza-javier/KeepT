@@ -170,6 +170,7 @@ class Tray:
         auto.setChecked(cfg.autostart)
         auto.triggered.connect(lambda checked: app.set_autostart(checked))
 
+        m.addAction(i18n.tr("tray_languages")).triggered.connect(self._languages)
         models_menu = m.addMenu(i18n.tr("tray_models"))
         installed = app.engine.translator.store.installed()
         if not installed:
@@ -191,6 +192,14 @@ class Tray:
         m.addSeparator()
         m.addAction(i18n.tr("tray_about")).triggered.connect(self._about)
         m.addAction(i18n.tr("tray_quit")).triggered.connect(app.quit)
+
+    def _languages(self) -> None:
+        from .languages_dialog import LanguagesDialog
+
+        app = self.app
+        dlg = LanguagesDialog(app.engine.translator.store, app.target, app.likely_sources() + [app.target])
+        if dlg.exec() == QDialog.Accepted:
+            app.set_languages(dlg.chosen_target(), dlg.chosen_sources())
 
     def change_hotkey(self) -> None:
         self._custom_hotkey()

@@ -49,6 +49,7 @@ class KeepTApp:
         plat = services()
         self.system_lang = plat.system_language()
         i18n.set_ui_lang(self.system_lang)
+        self.installer_languages = apply_installer_languages(self.config, plat.installer_option)
         self.target = self.config.effective_target(self.system_lang)
         self.grabber = ScreenGrabber()
         self.fake_capture = load_image_bgra(args.fake_capture) if args.fake_capture else None
@@ -104,7 +105,10 @@ class KeepTApp:
             # Ask once which language to translate into; models are downloaded after the answer.
             QTimer.singleShot(600, self._ask_target)
         if self.config.target_chosen:  # on first run, wait for the answer
-            QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=False,
+            # Languages chosen in the installer or the tray are wanted: fetch what is missing
+            # (for example when the installer had no internet). Otherwise only load.
+            download = bool(self.config.source_langs)
+            QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=download,
                                                                 sources=self.likely_sources()))
             QTimer.singleShot(4000, self._cleanup_old_models)
             self._idle_timer.start()
@@ -112,6 +116,10 @@ class KeepTApp:
         QTimer.singleShot(6000, self.updates.check_if_due)  # at startup, at most once a day
         if args.open:
             QTimer.singleShot(300, self.trigger)
+
+        if self.installer_languages and first_run:
+            QTimer.singleShot(1200, lambda: self.tray.notify(
+                i18n.tr("tray_ready_title"), i18n.tr("tray_ready_body", hotkey=i18n.hotkey_label(self.config.hotkey))))
 
     # -- overlays per monitor ----------------------------------------------------------
     def _add_overlay(self, screen) -> None:
@@ -207,7 +215,11 @@ class KeepTApp:
         log.info("Reported missing OCR pack for %s", lang)
 
     def likely_sources(self) -> list[str]:
-        """Languages the user most likely reads: last one seen, the Windows one, English."""
+        """Languages the user translates from: the ones chosen in the installer or in the tray
+        "Languages" window; without a choice, the last one seen, the Windows one and English."""
+        chosen = [c for c in self.config.source_langs if c in LANGUAGES and c != self.target]
+        if chosen:
+            return chosen
         out = []
         for code in (self.config.last_source_lang, self.system_lang, "en"):
             if code in LANGUAGES and code != self.target and code not in out:
@@ -295,6 +307,19 @@ class KeepTApp:
         self.config.save()
         services().set_autostart(enabled)
 
+    def set_languages(self, target: str, sources: list[str]) -> None:
+        """Choice from the tray "Languages" window: download what is missing in the background
+        (progress in the tray tooltip, a notice when done) and delete models no longer needed."""
+        from .translate import setup_plan
+
+        store = self.engine.translator.store
+        self.config.source_langs = list(sources)
+        self._languages_pending = bool(setup_plan.missing_pairs(store, target, sources))
+        for pair in setup_plan.unneeded_installed(store, target, sources):
+            self.delete_model(*pair)
+        self.set_target(target)  # saves the config and downloads what is missing
+        log.info("Languages chosen in the tray: %s -> %s", ",".join(sources), target)
+
     def delete_model(self, src: str, tgt: str) -> None:
         self.engine.translator.unload(src, tgt)
         self.engine.translator.store.delete(src, tgt)
@@ -332,6 +357,9 @@ class KeepTApp:
     def _on_preload_status(self, pair: str, fraction: float) -> None:
         if fraction < 0:
             self.tray.update_tooltip("")
+            if getattr(self, "_languages_pending", False):
+                self._languages_pending = False
+                self.tray.notify(i18n.tr("languages_done_title"), i18n.tr("languages_done_body"))
         else:
             self.tray.update_tooltip(i18n.tr("downloading", pct=int(fraction * 100)))
 
@@ -477,6 +505,39 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+def apply_installer_languages(config, read_option) -> bool:
+    """Apply the languages chosen in the installer ("Translate into" and the source languages),
+    once per installation: the installer writes a new stamp every time it runs."""
+    from .languages import CODES
+
+    stamp = read_option("LanguagesStamp")
+    target = read_option("TargetLang")
+    if not stamp or str(stamp) == config.installer_stamp or target not in CODES:
+        return False
+    sources = [c for c in str(read_option("SourceLangs") or "").split(",") if c in CODES]
+    config.target_lang = target
+    config.target_chosen = True  # no welcome question: the installer already asked
+    config.source_langs = sources
+    config.installer_stamp = str(stamp)
+    config.save()
+    log.info("Languages from the installer: %s -> %s", ",".join(sources), target)
+    return True
+
+
+def install_model_cli(zip_path: str, src: str, tgt: str) -> int:
+    from .paths import setup_logging
+    from .translate.models import ModelError, ModelStore
+
+    setup_logging(False)
+    try:
+        ModelStore().install_package(Path(zip_path), src, tgt)
+    except (ModelError, OSError) as exc:
+        log.error("Installer model %s->%s not installed: %s", src, tgt, exc)
+        return 1
+    log.info("Installer model %s->%s installed", src, tgt)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["--version"]:
@@ -488,6 +549,9 @@ def main(argv: list[str] | None = None) -> int:
         from .translate.models import run_converter
 
         return run_converter(argv[1], argv[2])
+    if argv[:1] == ["--install-model"] and len(argv) >= 4:
+        # Used by the installer: unpack a model package it downloaded (verified again here).
+        return install_model_cli(argv[1], argv[2], argv[3])
     args = parse_args(argv)
     services().init_process()
     from .paths import setup_logging
