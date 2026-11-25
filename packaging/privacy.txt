@@ -11,7 +11,7 @@ KeepT only connects to the internet for two things:
    (object.pouta.csc.fi). Only the model file is requested.
 
 2. Checking for new KeepT versions, at most once a day, by asking the public GitHub API for the
-   latest release. No information about you or your screen is sent. You can turn this off on
+   newest release. No information about you or your screen is sent. You can turn this off on
    the next page of this installer or later in the tray menu ("Check for updates").
 
 GitHub and the University of Helsinki servers may log the requests they receive (for example
