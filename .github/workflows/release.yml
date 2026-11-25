@@ -146,4 +146,6 @@ jobs:
           Translation models are downloaded on first use from the models-v1 release (verified with SHA-256).
           "@
           $notes | Out-File -Encoding utf8 notes.txt
-          gh release create "${{ github.ref_name }}" "installer/Output/KeepT-Setup-$v.exe" "installer/Output/KeepT-Setup-$v.exe.sha256" --title "KeepT $v" --notes-file notes.txt --latest
+          # 0.x is not stable yet: publish it as a pre-release (never marked as latest).
+          if ($v.StartsWith("0.")) { $kind = @("--prerelease", "--latest=false") } else { $kind = @("--latest") }
+          gh release create "${{ github.ref_name }}" "installer/Output/KeepT-Setup-$v.exe" "installer/Output/KeepT-Setup-$v.exe.sha256" --title "KeepT $v" --notes-file notes.txt @kind

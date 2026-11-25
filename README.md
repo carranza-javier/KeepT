@@ -9,12 +9,14 @@ no API keys, and nothing leaves your PC.
 
 ## Download
 
-**[Download the latest KeepT for Windows](https://github.com/carranza-javier/KeepT/releases/latest)**
-(`KeepT-Setup-x.y.z.exe`, about 50 MB, Windows 10 or 11, 64-bit).
+**[Download KeepT for Windows](https://github.com/carranza-javier/KeepT/releases)**
+(`KeepT-Setup-x.y.z.exe` from the newest release, about 50 MB, Windows 10 or 11, 64-bit).
+
+KeepT is not stable yet: 0.x versions are published as pre-releases.
 
 - The installer is per user: no administrator rights are needed. It can start KeepT with Windows.
 - Every release lists the SHA-256 of the installer. To check it in PowerShell:
-  `Get-FileHash .\KeepT-Setup-1.0.1.exe -Algorithm SHA256`
+  `Get-FileHash .\KeepT-Setup-0.9.0.exe -Algorithm SHA256`
 - **Windows SmartScreen:** until the code signing certificate is approved (see
   [Code signing policy](#code-signing-policy)), the installer is not signed and Windows may show
   "Windows protected your PC". Click **More info** and then **Run anyway**. The installer is built
@@ -68,8 +70,8 @@ leave it. There are no accounts and no telemetry. KeepT only connects to the int
    repository. Each file is verified with the SHA-256 pinned in the app and discarded if it does
    not match. Only if GitHub cannot be reached is the original model downloaded from the official
    OPUS-MT servers of the University of Helsinki and converted on your PC.
-2. **Check for a new version**, at most once a day, by reading the latest release from the public
-   GitHub API. Nothing about you or your screen is sent. KeepT only shows a notice with a link and
+2. **Check for a new version**, at most once a day, by reading the list of releases from the
+   public GitHub API. Nothing about you or your screen is sent. KeepT only shows a notice with a link and
    never installs anything by itself. You can turn this off in the installer or in the tray menu.
 
 GitHub and the University of Helsinki may log these requests (for example your IP address)
@@ -121,7 +123,8 @@ Useful tools (they work without touching the real mouse or keyboard):
 
 - **App releases** are built only by GitHub Actions. Pushing a tag `vX.Y.Z` that matches
   `keept/__init__.py` runs the tests, builds `KeepT.exe` with PyInstaller and the installer with
-  Inno Setup on a Windows runner, and publishes them with their SHA-256 in a GitHub Release. The
+  Inno Setup on a Windows runner, and publishes them with their SHA-256 in a GitHub Release
+  (a pre-release while the version is 0.x). The
   SignPath signing steps are in the same workflow and stay off until the repository variable
   `SIGNPATH_ENABLED` is `true`.
 - **Translation models** live in the `models-v1` release. After changing

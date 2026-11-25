@@ -87,7 +87,7 @@ _version_file = Path(workpath) / "version_info.txt"
 _version_file.parent.mkdir(parents=True, exist_ok=True)
 _version_file.write_text(
     (ROOT / "packaging" / "version_info.txt").read_text(encoding="utf-8")
-    .replace("(1, 0, 0, 0)", str(_v4)).replace("1.0.0", _version),
+    .replace("VERSION_TUPLE", str(_v4)).replace("VERSION_TEXT", _version),
     encoding="utf-8",
 )
 

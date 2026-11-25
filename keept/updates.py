@@ -1,4 +1,8 @@
-"""Update check: at most once a day, ask the GitHub API for the latest KeepT release.
+"""Update check: at most once a day, ask the GitHub API for the newest KeepT release.
+
+While KeepT is 0.x every release is a pre-release, so the check reads the release list (which
+includes pre-releases) instead of "latest" (which skips them), and takes the highest vX.Y.Z
+tag. Drafts and other tags (such as the models-v1 release) are ignored.
 
 Only the public release information is requested (no identifiers are sent). When a newer
 version exists, the tray shows a notice with a link to the download page; KeepT never
@@ -22,8 +26,8 @@ from . import __version__
 log = logging.getLogger(__name__)
 
 REPO = "carranza-javier/KeepT"
-LATEST_API = f"https://api.github.com/repos/{REPO}/releases/latest"
-RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
+RELEASES_API = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
+RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 CHECK_EVERY_S = 24 * 3600
 
 
@@ -45,17 +49,18 @@ class Release:
 
 
 def fetch_latest(opener=None) -> Release | None:
-    """The latest published (non pre-release) app release, or None if it cannot be read."""
-    req = urllib.request.Request(LATEST_API, headers={"Accept": "application/vnd.github+json",
-                                                      "User-Agent": "KeepT-update-check"})
+    """The newest published app release, pre-releases included, or None if there is none."""
+    req = urllib.request.Request(RELEASES_API, headers={"Accept": "application/vnd.github+json",
+                                                        "User-Agent": "KeepT-update-check"})
     with (opener or urllib.request.urlopen)(req, timeout=10) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-    tag = data.get("tag_name", "")
-    if not parse_version(tag):
+    candidates = [r for r in data if isinstance(r, dict) and not r.get("draft") and parse_version(r.get("tag_name", ""))]
+    if not candidates:
         return None
-    installer = next((a["browser_download_url"] for a in data.get("assets", [])
+    newest = max(candidates, key=lambda r: parse_version(r["tag_name"]))
+    installer = next((a["browser_download_url"] for a in newest.get("assets", [])
                       if a.get("name", "").lower().endswith(".exe")), "")
-    return Release(tag.lstrip("v"), data.get("html_url") or RELEASES_PAGE, installer)
+    return Release(newest["tag_name"].lstrip("v"), newest.get("html_url") or RELEASES_PAGE, installer)
 
 
 class UpdateChecker(QObject):
