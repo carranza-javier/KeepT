@@ -35,6 +35,7 @@ log = logging.getLogger(__name__)
 
 GLOW_PX = 8.0  # logical
 STROKE_PX = 4.0  # logical
+STROKE_FADE_MS = 220.0  # fade of the selection outline after release
 MIN_TEXT_PX = 10.0  # logical, smallest legible translated text
 FADE_MS = 220.0
 
@@ -44,6 +45,22 @@ _UNTRANSLATABLE = re.compile(
     r"|(?:https?://|www\.)\S+"  # URLs
     r"|[\w.+-]+@[\w-]+\.[\w.-]+"  # e-mail addresses
 )
+
+
+def pointer_tool(event) -> str:
+    """"touch" for fingers and pens (Windows delivers them as mouse events synthesized from a
+    touch screen or stylus device), "mouse" for a mouse or a touchpad."""
+    from PySide6.QtGui import QInputDevice, QPointingDevice
+
+    device = event.device()
+    if device is not None and device.type() in (QInputDevice.DeviceType.TouchScreen,
+                                                 QInputDevice.DeviceType.Stylus,
+                                                 QInputDevice.DeviceType.Airbrush):
+        return "touch"
+    if event.pointerType() in (QPointingDevice.PointerType.Finger, QPointingDevice.PointerType.Pen,
+                               QPointingDevice.PointerType.Eraser):
+        return "touch"
+    return "mouse"
 
 
 def looks_untranslatable(text: str) -> bool:
@@ -156,6 +173,7 @@ class OverlayWindow(QWidget):
         self.pending_action: tuple | None = None
         self.items: dict[int, Item] = {}
         self.stroke: list[QPointF] = []  # logical points
+        self.stroke_tool = "mouse"
         self.dragging = False
         self.stroke_fade_from = -1.0
         self.last_stroke_path: QPainterPath | None = None
@@ -544,6 +562,7 @@ class OverlayWindow(QWidget):
             return
         item.status = "done"
         item.t_done = self.now()
+        self.last_stroke_path = None  # the selection outline never stays over a translation
         if getattr(self, "_t_request", None):
             log.info("First block on screen %.0f ms after the translation request (%.0f ms after hotkey)",
                      (time.perf_counter() - self._t_request) * 1000, (time.perf_counter() - self._t_hotkey) * 1000)
@@ -564,7 +583,8 @@ class OverlayWindow(QWidget):
             return
         for k in keys:
             self.items.pop(k, None)
-        msg = {"network": "err_network", "disk": "err_disk", "unavailable": "err_translate"}.get(kind, "err_translate")
+        msg = {"network": "err_network", "disk": "err_disk", "integrity": "err_integrity",
+               "unavailable": "err_translate"}.get(kind, "err_translate")
         if not self.items:
             self.state = State.READY
             self.pill.set_mode("ready")
@@ -669,6 +689,7 @@ class OverlayWindow(QWidget):
             return
         self.dragging = True
         self.stroke = [e.position()]
+        self.stroke_tool = pointer_tool(e)
         self.stroke_fade_from = -1.0
 
     def mouseMoveEvent(self, e):
@@ -687,7 +708,7 @@ class OverlayWindow(QWidget):
             return
         self.dragging = False
         points = [self.to_phys(p) for p in self.stroke]
-        gesture = classify(points, click_tolerance=6 * self.scale)
+        gesture = classify(points, tool=self.stroke_tool, click_tolerance=6 * self.scale)
         if gesture.kind != "click":
             self.last_stroke_path = self._stroke_shape(gesture)
             self.stroke_fade_from = self.now()
@@ -833,21 +854,20 @@ class OverlayWindow(QWidget):
                                                     if self.last_stroke_path is not None else QPointF())
         light = self.glow.is_light_at(start.x(), start.y())
         if self.dragging and len(self.stroke) > 1:
-            points = [self.to_phys(q) for q in self.stroke]
-            g = classify(points, click_tolerance=6 * self.scale)
-            if g.kind == "rect":
-                r = self.to_logical(g.rect)
-                fill = QColor(255, 255, 255, 28)
+            if self.stroke_tool == "mouse":
+                # Mouse: only the rectangle between the press point and the pointer.
+                rect = QRectF(self.stroke[0], self.stroke[-1]).normalized()
                 path = QPainterPath()
-                path.addRoundedRect(r, 10, 10)
-                p.fillPath(path, fill)
-                effects.paint_stroke(p, path, center, angle, STROKE_PX, 0.55, light_bg=light)
-                effects.paint_stroke(p, effects.smooth_path(self.stroke), center, angle, STROKE_PX * 0.75, 0.6,
-                                     light_bg=light)
+                path.addRoundedRect(rect, 10, 10)
+                p.fillPath(path, QColor(255, 255, 255, 28))
+                effects.paint_stroke(p, path, center, angle, STROKE_PX, light_bg=light)
             else:
+                # Finger or pen: the free-hand lasso.
                 effects.paint_stroke(p, effects.smooth_path(self.stroke), center, angle, STROKE_PX, light_bg=light)
         elif self.last_stroke_path is not None and self.stroke_fade_from >= 0:
-            k = 1 - (t - self.stroke_fade_from) / 380
+            # After release the outline fades out quickly; the selected blocks stay highlighted
+            # (shimmer) and the outline is removed as soon as a translation appears.
+            k = 1 - (t - self.stroke_fade_from) / STROKE_FADE_MS
             if k <= 0:
                 self.last_stroke_path = None
             else:

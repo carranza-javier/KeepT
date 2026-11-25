@@ -73,20 +73,34 @@ class Driver:
     def phys_to_logical(self, x: float, y: float) -> QPointF:
         return QPointF(x / self.ov.scale, y / self.ov.scale)
 
-    def _mouse(self, kind, pos: QPointF, button, buttons) -> None:
-        ev = QMouseEvent(kind, pos, self.ov.mapToGlobal(pos), button, buttons, Qt.NoModifier)
+    _touch = None
+
+    @classmethod
+    def touch_device(cls):
+        """A touch screen device: mouse events from it are what Windows sends for a finger."""
+        if cls._touch is None:
+            from PySide6.QtGui import QInputDevice, QPointingDevice
+
+            cls._touch = QPointingDevice("synthetic touchscreen", 4242, QInputDevice.DeviceType.TouchScreen,
+                                         QPointingDevice.PointerType.Finger, QInputDevice.Capability.Position, 1, 0)
+        return cls._touch
+
+    def _mouse(self, kind, pos: QPointF, button, buttons, touch: bool = False) -> None:
+        extra = (self.touch_device(),) if touch else ()
+        ev = QMouseEvent(kind, pos, self.ov.mapToGlobal(pos), button, buttons, Qt.NoModifier, *extra)
         QApplication.sendEvent(self.ov, ev)
 
-    def drag(self, points_phys, shot_mid: str | None = None) -> None:
+    def drag(self, points_phys, shot_mid: str | None = None, touch: bool = False) -> None:
+        """Mouse drag (rectangle) or, with touch=True, a finger drag (lasso)."""
         pts = [self.phys_to_logical(x, y) for x, y in points_phys]
-        self._mouse(QEvent.MouseButtonPress, pts[0], Qt.LeftButton, Qt.LeftButton)
+        self._mouse(QEvent.MouseButtonPress, pts[0], Qt.LeftButton, Qt.LeftButton, touch)
         for i, p in enumerate(pts[1:], 1):
-            self._mouse(QEvent.MouseMove, p, Qt.NoButton, Qt.LeftButton)
+            self._mouse(QEvent.MouseMove, p, Qt.NoButton, Qt.LeftButton, touch)
             self.pump(4)
             if shot_mid and i == int(len(pts) * 0.85):
                 self.pump(20)
                 self.shot(shot_mid)
-        self._mouse(QEvent.MouseButtonRelease, pts[-1], Qt.LeftButton, Qt.NoButton)
+        self._mouse(QEvent.MouseButtonRelease, pts[-1], Qt.LeftButton, Qt.NoButton, touch)
 
     def click(self, x: float, y: float) -> None:
         self.drag([(x, y), (x + 1, y)])
@@ -135,7 +149,7 @@ def main() -> int:
 
     if sc in ("all", "lasso"):
         target = d.ov.blocks[min(2, len(d.ov.blocks) - 1)]
-        d.drag(lasso_around(target.rect), shot_mid="lasso_drawing")
+        d.drag(lasso_around(target.rect), shot_mid="lasso_drawing", touch=True)
         d.pump(60)
         d.shot("lasso_pending")
         ok = d.wait_until(d.translation_done)
@@ -181,7 +195,7 @@ def main() -> int:
         d.shot("lang_menu")
 
     if sc == "empty":
-        d.drag(lasso_around(type("R", (), {"cx": 900, "cy": 1150, "w": 40, "h": 20})(), 10))
+        d.drag(lasso_around(type("R", (), {"cx": 900, "cy": 1150, "w": 40, "h": 20})(), 10), touch=True)
         d.pump(300)
         d.shot("no_text")
 

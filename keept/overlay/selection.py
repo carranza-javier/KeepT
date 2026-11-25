@@ -1,14 +1,14 @@
 """Turn a pointer gesture into a selection of text blocks.
 
-A gesture is a list of points in physical pixels. It is classified as:
-- click: the pointer barely moved,
-- rect: an almost straight diagonal stroke (the two ends are opposite corners),
-- lasso: anything else (the stroke is closed implicitly).
+The kind of selection depends only on the input device, never on the shape of the stroke:
+- a press that barely moves is a click (or a tap) on a block,
+- dragging with a mouse (or touchpad) selects a rectangle between the press and release points,
+- dragging with a finger or a pen draws a free-hand lasso.
+Points are in physical pixels.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 from ..ocr.layout import Block, Line, Rect
@@ -23,33 +23,20 @@ class Gesture:
     rect: Rect | None = None
 
 
-def path_length(points: list[Point]) -> float:
-    return sum(math.dist(a, b) for a, b in zip(points, points[1:]))
+def drag_rect(start: Point, end: Point) -> Rect:
+    return Rect(min(start[0], end[0]), min(start[1], end[1]), abs(end[0] - start[0]), abs(end[1] - start[1]))
 
 
-def _max_deviation(points: list[Point]) -> float:
-    (x1, y1), (x2, y2) = points[0], points[-1]
-    d = math.hypot(x2 - x1, y2 - y1)
-    if d == 0:
-        return max((math.dist(points[0], p) for p in points), default=0.0)
-    return max(abs((x2 - x1) * (y1 - py) - (x1 - px) * (y2 - y1)) / d for px, py in points)
-
-
-def classify(points: list[Point], click_tolerance: float = 6.0) -> Gesture:
+def classify(points: list[Point], tool: str = "mouse", click_tolerance: float = 6.0) -> Gesture:
+    """`tool` is "mouse" (mouse or touchpad) or "touch" (finger or pen)."""
     if not points:
         raise ValueError("empty gesture")
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
     if max(xs) - min(xs) <= click_tolerance and max(ys) - min(ys) <= click_tolerance:
         return Gesture("click", (points[0],))
-    start, end = points[0], points[-1]
-    d = math.dist(start, end)
-    dx, dy = abs(end[0] - start[0]), abs(end[1] - start[1])
-    if d > 3 * click_tolerance and dx > click_tolerance and dy > click_tolerance:
-        straight = path_length(points) / d < 1.15 and _max_deviation(points) < 0.12 * d
-        if straight:
-            r = Rect(min(start[0], end[0]), min(start[1], end[1]), dx, dy)
-            return Gesture("rect", tuple(points), r)
+    if tool == "mouse":
+        return Gesture("rect", (points[0], points[-1]), drag_rect(points[0], points[-1]))
     return Gesture("lasso", tuple(points))
 
 
@@ -124,11 +111,17 @@ def select_blocks(blocks: list[Block], gesture: Gesture) -> list[Block]:
         part = _subset(block, keep)
         if part:
             chosen.append(part)
-    if not chosen and gesture.kind == "lasso":
-        # An open stroke (for example underlining a line) encloses nothing: use what it touches.
+    if not chosen:
+        # An open stroke or a very flat rectangle (for example underlining a line) encloses
+        # nothing: use the lines it touches.
         for block in blocks:
             pad = block.line_height * 0.3
-            part = _subset(block, [_line_touched(l, gesture.points, pad) for l in block.lines])
+            if gesture.kind == "lasso":
+                keep = [_line_touched(l, gesture.points, pad) for l in block.lines]
+            else:
+                grown = gesture.rect.adjusted(-pad, -pad, pad, pad)
+                keep = [l.rect.intersection_area(grown) > 0 for l in block.lines]
+            part = _subset(block, keep)
             if part:
                 chosen.append(part)
     return chosen

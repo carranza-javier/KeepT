@@ -22,24 +22,28 @@ def circle(cx, cy, r, n=40):
 
 
 def test_classify_click():
-    g = classify([(10, 10), (12, 11), (11, 13)])
-    assert g.kind == "click" and g.points == ((10, 10),)
+    for tool in ("mouse", "touch"):
+        g = classify([(10, 10), (12, 11), (11, 13)], tool=tool)
+        assert g.kind == "click" and g.points == ((10, 10),)
 
 
-def test_classify_straight_diagonal_is_rect():
-    pts = [(100 + i * 10, 100 + i * 5 + (1 if i % 2 else 0)) for i in range(30)]
-    g = classify(pts)
-    assert g.kind == "rect"
-    assert (g.rect.x, g.rect.y) == (100, 100)
-    assert g.rect.w == 290
+def test_mouse_drag_is_always_a_rectangle():
+    # whatever the path looks like, a mouse drag selects the rectangle between press and release
+    for path in (circle(300, 300, 100), [(100 + i * 10, 100 + i * 5) for i in range(30)],
+                 [(100, 100), (400, 120), (150, 300), (380, 260)]):
+        g = classify(path, tool="mouse")
+        assert g.kind == "rect"
+        (x0, y0), (x1, y1) = path[0], path[-1]
+        assert (g.rect.x, g.rect.y) == (min(x0, x1), min(y0, y1))
+        assert (g.rect.w, g.rect.h) == (abs(x1 - x0), abs(y1 - y0))
+        assert g.points == (path[0], path[-1])  # no free-hand trace is kept for a mouse drag
 
 
-def test_classify_curve_is_lasso():
-    assert classify(circle(300, 300, 100)).kind == "lasso"
-
-
-def test_horizontal_line_is_not_rect():
-    assert classify([(100 + i * 10, 200) for i in range(30)]).kind == "lasso"
+def test_touch_drag_is_always_a_lasso():
+    # even a perfectly straight diagonal stays a lasso with a finger or a pen
+    for path in (circle(300, 300, 100), [(100 + i * 10, 100 + i * 5) for i in range(30)]):
+        g = classify(path, tool="touch")
+        assert g.kind == "lasso" and g.rect is None and len(g.points) == len(path)
 
 
 def test_point_in_polygon():
@@ -69,7 +73,7 @@ def test_rect_selects_whole_paragraph():
 def test_lasso_selects_only_circled_lines():
     blocks = screen_blocks()
     lasso = [(80, 112), (420, 112), (420, 160), (80, 160), (80, 113)]
-    sel = select_blocks(blocks, classify(lasso))
+    sel = select_blocks(blocks, classify(lasso, tool="touch"))
     assert len(sel) == 1
     assert sel[0].text == "First line of the paragraph second line of the paragraph"
     assert sel[0].meta["parent"] == blocks[1].id
@@ -77,14 +81,20 @@ def test_lasso_selects_only_circled_lines():
 
 def test_lasso_around_everything():
     blocks = screen_blocks()
-    sel = select_blocks(blocks, classify(circle(500, 250, 700)))
+    sel = select_blocks(blocks, classify(circle(500, 250, 700), tool="touch"))
     assert len(sel) == len(blocks)
 
 
 def test_underline_stroke_selects_touched_line():
     blocks = screen_blocks()
     stroke = [(100 + i * 10, 415) for i in range(0, 80)]
-    sel = select_blocks(blocks, classify(stroke))
+    sel = select_blocks(blocks, classify(stroke, tool="touch"))
+    assert [b.text for b in sel] == ["Button"]
+
+
+def test_flat_mouse_rectangle_under_a_line_selects_it():
+    blocks = screen_blocks()
+    sel = select_blocks(blocks, classify([(780, 421), (900, 423)], tool="mouse"))
     assert [b.text for b in sel] == ["Button"]
 
 
