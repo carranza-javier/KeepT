@@ -1,7 +1,9 @@
 """Animated effects drawn with QPainter: edge glow, selection stroke, shimmer and icons.
 
-Palette "Aurora": teal, azure, violet, magenta and amber. Vivid like Circle to
-Search but with its own hues; checked on light and dark captures.
+Colours: the KettenKI brand gradient, 135 degrees from #00d4ff (cyan) to #00ff88 (green),
+plus in-between tones and lighter variants so the wave running along the edges has life.
+On light parts of the screen the green barely contrasts, so a darker, more saturated set of
+the same hues is used there (chosen per zone from the frozen screenshot).
 """
 
 from __future__ import annotations
@@ -11,7 +13,30 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QConicalGradient, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QRegion
 
-PALETTE = [QColor("#00D9C0"), QColor("#3A7BFF"), QColor("#8E5BFF"), QColor("#FF4F9A"), QColor("#FFB23F")]
+BRAND_CYAN = QColor("#00d4ff")
+BRAND_GREEN = QColor("#00ff88")
+BRAND_ANGLE = 135.0  # degrees, CSS convention (towards the bottom right)
+
+# Cyclic stops for the conical sweep: cyan, a lighter cyan crest, the cyan-green middle,
+# green, a lighter green crest and back. Light crests read as a travelling wave.
+PALETTE_ON_DARK = [QColor("#00d4ff"), QColor("#8ff0ff"), QColor("#00eac4"), QColor("#00ff88"),
+                   QColor("#8fffc8"), QColor("#00eac4")]
+# Same hues, darker and more saturated, for light backgrounds (contrast against white).
+PALETTE_ON_LIGHT = [QColor("#0099d1"), QColor("#00b8ec"), QColor("#00a8a0"), QColor("#00a85c"),
+                    QColor("#00c46c"), QColor("#00a8a0")]
+PALETTE = PALETTE_ON_DARK
+
+
+def brand_gradient(rect: QRectF, light_bg: bool = False) -> QLinearGradient:
+    """The 135 degree brand gradient across `rect` (top left cyan to bottom right green)."""
+    g = QLinearGradient(rect.topLeft(), rect.bottomRight())
+    if light_bg:
+        g.setColorAt(0, QColor("#0099d1"))
+        g.setColorAt(1, QColor("#00a85c"))
+    else:
+        g.setColorAt(0, BRAND_CYAN)
+        g.setColorAt(1, BRAND_GREEN)
+    return g
 
 ENTRY_MS = 500.0
 PULSE_PERIOD_S = 2.6
@@ -27,11 +52,12 @@ def ease_in_out(t: float) -> float:
     return t * t * (3 - 2 * t)
 
 
-def conical(center: QPointF, angle: float, alpha: float = 1.0) -> QConicalGradient:
+def conical(center: QPointF, angle: float, alpha: float = 1.0, palette=None) -> QConicalGradient:
+    palette = palette or PALETTE_ON_DARK
     g = QConicalGradient(center, angle)
-    n = len(PALETTE)
+    n = len(palette)
     for i in range(n + 1):
-        c = QColor(PALETTE[i % n])
+        c = QColor(palette[i % n])
         c.setAlphaF(max(0.0, min(1.0, alpha)))
         g.setColorAt(i / n, c)
     return g
@@ -45,6 +71,73 @@ class EdgeGlow:
     def __init__(self) -> None:
         self.level = 1.0  # extra multiplier (lowered while a translation is shown)
         self._buf: QImage | None = None
+        self._buf_light: QImage | None = None
+        self._mask: QImage | None = None  # alpha = how light the screen is there (low res)
+        self._light_region: QRegion | None = None  # light zones, logical px
+
+    def set_background(self, lightness, logical_size) -> None:
+        """`lightness`: 2D float array (0 dark .. 1 light) of the capture, any resolution.
+        Builds the low resolution mask used to pick the palette per zone."""
+        import numpy as np
+
+        if lightness is None:
+            self._mask = None
+            self._light_region = None
+            return
+        f = self.DOWNSCALE
+        w = max(8, math.ceil(logical_size.width() / f))
+        h = max(8, math.ceil(logical_size.height() / f))
+        ys = np.linspace(0, lightness.shape[0] - 1, h).astype(int)
+        xs = np.linspace(0, lightness.shape[1] - 1, w).astype(int)
+        small = lightness[np.ix_(ys, xs)]
+        # Light zones: relative luminance above ~0.5, with a soft transition.
+        alpha = np.clip((small - 0.42) / 0.2, 0.0, 1.0)
+        a8 = np.ascontiguousarray((alpha * 255).astype(np.uint8))
+        argb = np.zeros((h, w, 4), np.uint8)
+        argb[..., 3] = a8
+        argb[..., 0] = a8
+        argb[..., 1] = a8
+        argb[..., 2] = a8  # premultiplied white
+        self._mask = QImage(argb.data, w, h, w * 4, QImage.Format_ARGB32_Premultiplied).copy()
+        bits = QImage(np.ascontiguousarray(np.where(alpha >= 0.5, 255, 0).astype(np.uint8)).data, w, h, w,
+                      QImage.Format_Grayscale8).copy()
+        from PySide6.QtGui import QBitmap, QTransform
+
+        region = QRegion(QBitmap.fromImage(bits.createMaskFromColor(0xFF000000, Qt.MaskOutColor)))
+        self._light_region = QTransform.fromScale(f, f).map(region)
+
+    def is_light_at(self, x: float, y: float) -> bool:
+        """Whether the screen is light at a logical point (for the selection stroke)."""
+        if self._mask is None:
+            return False
+        f = self.DOWNSCALE
+        px = int(min(max(x / f, 0), self._mask.width() - 1))
+        py = int(min(max(y / f, 0), self._mask.height() - 1))
+        return self._mask.pixelColor(px, py).alpha() >= 128
+
+    def _render_rings(self, buf: QImage, palette, angle, k, core, tail, reach) -> None:
+        f = self.DOWNSCALE
+        buf.fill(Qt.transparent)
+        small = QRectF(0, 0, buf.width(), buf.height())
+        q = QPainter(buf)
+        q.setRenderHint(QPainter.Antialiasing)
+        q.setBrush(Qt.NoBrush)
+        grad = conical(small.center(), angle, palette=palette)
+        # Thin, non overlapping rings whose opacity falls off smoothly from the edge inwards
+        # (bright core plus exponential tail): no visible bands, even on dark backgrounds.
+        step = 0.5
+        d = 0.0
+        while d < reach / f:
+            dist = d * f
+            alpha = 0.95 if dist < core else 0.7 * math.exp(-(dist - core) / tail)
+            pen = QPen(QBrush(grad), step)
+            pen.setJoinStyle(Qt.MiterJoin)
+            q.setPen(pen)
+            q.setOpacity(min(1.0, alpha * k))
+            inset = d + step / 2
+            q.drawRect(small.adjusted(inset, inset, -inset, -inset))
+            d += step
+        q.end()
 
     def intensity(self, elapsed_ms: float) -> float:
         if elapsed_ms < ENTRY_MS:
@@ -75,27 +168,20 @@ class EdgeGlow:
         w, h = max(8, math.ceil(rect.width() / f)), max(8, math.ceil(rect.height() / f))
         if self._buf is None or self._buf.width() != w or self._buf.height() != h:
             self._buf = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
-        self._buf.fill(Qt.transparent)
-        small = QRectF(0, 0, w, h)
-        q = QPainter(self._buf)
-        q.setRenderHint(QPainter.Antialiasing)
-        q.setBrush(Qt.NoBrush)
-        grad = conical(small.center(), angle)
-        # Thin, non overlapping rings whose opacity falls off smoothly from the edge inwards
-        # (bright core plus exponential tail): no visible bands, even on dark backgrounds.
-        step = 0.5
-        d = 0.0
-        while d < reach / f:
-            dist = d * f
-            alpha = 0.95 if dist < core else 0.7 * math.exp(-(dist - core) / tail)
-            pen = QPen(QBrush(grad), step)
-            pen.setJoinStyle(Qt.MiterJoin)
-            q.setPen(pen)
-            q.setOpacity(min(1.0, alpha * k))
-            inset = d + step / 2
-            q.drawRect(small.adjusted(inset, inset, -inset, -inset))
-            d += step
-        q.end()
+            self._buf_light = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+        mask = self._mask if self._mask is not None and self._mask.size() == self._buf.size() else None
+        self._render_rings(self._buf, PALETTE_ON_DARK, angle, k, core, tail, reach)
+        if mask is not None:
+            # Keep the bright palette only on dark zones and the deep palette only on light ones.
+            self._render_rings(self._buf_light, PALETTE_ON_LIGHT, angle, k, core, tail, reach)
+            q = QPainter(self._buf)
+            q.setCompositionMode(QPainter.CompositionMode_DestinationOut)
+            q.drawImage(0, 0, mask)
+            q.end()
+            q = QPainter(self._buf_light)
+            q.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+            q.drawImage(0, 0, mask)
+            q.end()
 
         p.save()
         p.setRenderHint(QPainter.SmoothPixmapTransform)
@@ -103,15 +189,27 @@ class EdgeGlow:
             QRegion(rect.adjusted(reach + f, reach + f, -reach - f, -reach - f).toAlignedRect()))
         p.setClipRegion(border)
         p.drawImage(rect, self._buf)
-        # Crisp line right at the edge, at full resolution.
-        p.setClipping(False)
-        pen = QPen(QBrush(conical(rect.center(), angle)), max(1.5, core))
-        pen.setJoinStyle(Qt.MiterJoin)
-        p.setPen(pen)
+        if mask is not None:
+            p.drawImage(rect, self._buf_light)
+        # Crisp line right at the edge, at full resolution, in the palette of each zone.
+        width = max(1.5, core)
+        inset = width / 2
+        edge = rect.adjusted(inset, inset, -inset, -inset)
         p.setBrush(Qt.NoBrush)
         p.setOpacity(min(1.0, 0.9 * k))
-        inset = max(1.5, core) / 2
-        p.drawRect(rect.adjusted(inset, inset, -inset, -inset))
+        zones = [(PALETTE_ON_DARK, None)]
+        if mask is not None and self._light_region is not None:
+            zones = [(PALETTE_ON_DARK, border.subtracted(self._light_region)),
+                     (PALETTE_ON_LIGHT, border.intersected(self._light_region))]
+        for palette, clip in zones:
+            if clip is not None:
+                p.setClipRegion(clip)
+            else:
+                p.setClipping(False)
+            pen = QPen(QBrush(conical(rect.center(), angle, palette=palette)), width)
+            pen.setJoinStyle(Qt.MiterJoin)
+            p.setPen(pen)
+            p.drawRect(edge)
         p.restore()
 
     @staticmethod
@@ -135,13 +233,15 @@ def smooth_path(points: list[QPointF]) -> QPainterPath:
     return path
 
 
-def paint_stroke(p: QPainter, path: QPainterPath, center: QPointF, angle: float, width: float, alpha: float = 1.0) -> None:
-    """White stroke with a coloured glow (colours follow the edge gradient)."""
+def paint_stroke(p: QPainter, path: QPainterPath, center: QPointF, angle: float, width: float, alpha: float = 1.0,
+                 light_bg: bool = False) -> None:
+    """White stroke with a coloured glow (colours follow the edge gradient; deeper tones
+    when the stroke is drawn over a light part of the screen)."""
     if alpha <= 0.01:
         return
     p.save()
     p.setBrush(Qt.NoBrush)
-    grad = conical(center, angle)
+    grad = conical(center, angle, palette=PALETTE_ON_LIGHT if light_bg else PALETTE_ON_DARK)
     for w, a in ((width * 5.0, 0.12), (width * 3.0, 0.25), (width * 1.8, 0.55)):
         pen = QPen(QBrush(grad), w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         p.setPen(pen)
@@ -189,11 +289,7 @@ def icon_sparkle(p: QPainter, r: QRectF, color: QColor) -> None:
     path.quadTo(c.x() + s * 0.12, c.y() + s * 0.12, c.x(), c.y() + s)
     path.quadTo(c.x() - s * 0.12, c.y() + s * 0.12, c.x() - s, c.y())
     path.quadTo(c.x() - s * 0.12, c.y() - s * 0.12, c.x(), c.y() - s)
-    g = QLinearGradient(r.topLeft(), r.bottomRight())
-    g.setColorAt(0, PALETTE[0])
-    g.setColorAt(0.5, PALETTE[1])
-    g.setColorAt(1, PALETTE[3])
-    p.fillPath(path, QBrush(g))
+    p.fillPath(path, QBrush(brand_gradient(r)))
 
 
 def icon_copy(p: QPainter, r: QRectF, color: QColor) -> None:

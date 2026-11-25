@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QConicalGradient, QFont, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 
-from .overlay.effects import PALETTE
+from .overlay.effects import brand_gradient
 
 SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 
@@ -16,10 +16,7 @@ def render_icon(size: int) -> QImage:
     p = QPainter(img)
     p.setRenderHint(QPainter.Antialiasing)
     r = QRectF(0, 0, size, size).adjusted(size * 0.04, size * 0.04, -size * 0.04, -size * 0.04)
-    g = QConicalGradient(r.center(), 120)
-    n = len(PALETTE)
-    for i in range(n + 1):
-        g.setColorAt(i / n, PALETTE[i % n])
+    g = brand_gradient(r)  # KettenKI 135 degree cyan -> green
     ring = max(1.6, size * 0.11)
     p.setPen(QPen(g, ring))
     p.setBrush(QColor(22, 24, 32))

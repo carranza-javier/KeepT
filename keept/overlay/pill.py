@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from .. import i18n
@@ -294,7 +294,7 @@ class Pill(QWidget):
             p.drawRoundedRect(track, 1.5, 1.5)
             fill = QRectF(track)
             fill.setWidth(track.width() * max(0.0, min(1.0, self._progress)))
-            p.setBrush(effects.PALETTE[1])
+            p.setBrush(QBrush(effects.brand_gradient(fill)))
             p.drawRoundedRect(fill, 1.5, 1.5)
 
 

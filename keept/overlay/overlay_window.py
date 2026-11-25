@@ -203,6 +203,10 @@ class OverlayWindow(QWidget):
         tm.append(time.perf_counter())
         self.state = State.READY
         self.glow.level = 1.0
+        # Per zone palette for the glow: how light the screen is, from a 1/8 sample.
+        sample = capture.bgra[::8, ::8, :3].astype("float32") / 255.0
+        lightness = sample[..., 2] * 0.2126 + sample[..., 1] * 0.7152 + sample[..., 0] * 0.0722
+        self.glow.set_background(lightness, self.size())
         self.pill.set_mode("ready")
         self.menu.hide()
         self.place_pill()
@@ -773,6 +777,9 @@ class OverlayWindow(QWidget):
     def _paint_stroke(self, p: QPainter, t: float) -> None:
         center = QPointF(self.width() / 2, self.height() / 2)
         angle = self.glow.angle(t)
+        start = self.stroke[0] if self.stroke else (self.last_stroke_path.pointAtPercent(0)
+                                                    if self.last_stroke_path is not None else QPointF())
+        light = self.glow.is_light_at(start.x(), start.y())
         if self.dragging and len(self.stroke) > 1:
             points = [self.to_phys(q) for q in self.stroke]
             g = classify(points, click_tolerance=6 * self.scale)
@@ -782,16 +789,18 @@ class OverlayWindow(QWidget):
                 path = QPainterPath()
                 path.addRoundedRect(r, 10, 10)
                 p.fillPath(path, fill)
-                effects.paint_stroke(p, path, center, angle, STROKE_PX, 0.55)
-                effects.paint_stroke(p, effects.smooth_path(self.stroke), center, angle, STROKE_PX * 0.75, 0.6)
+                effects.paint_stroke(p, path, center, angle, STROKE_PX, 0.55, light_bg=light)
+                effects.paint_stroke(p, effects.smooth_path(self.stroke), center, angle, STROKE_PX * 0.75, 0.6,
+                                     light_bg=light)
             else:
-                effects.paint_stroke(p, effects.smooth_path(self.stroke), center, angle, STROKE_PX)
+                effects.paint_stroke(p, effects.smooth_path(self.stroke), center, angle, STROKE_PX, light_bg=light)
         elif self.last_stroke_path is not None and self.stroke_fade_from >= 0:
             k = 1 - (t - self.stroke_fade_from) / 380
             if k <= 0:
                 self.last_stroke_path = None
             else:
-                effects.paint_stroke(p, self.last_stroke_path, center, angle, STROKE_PX, effects.ease_in_out(k))
+                effects.paint_stroke(p, self.last_stroke_path, center, angle, STROKE_PX, effects.ease_in_out(k),
+                                     light_bg=light)
 
     def _paint_toasts(self, p: QPainter, t: float) -> None:
         if not self.toasts:
