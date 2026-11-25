@@ -98,7 +98,13 @@ class Engine(QObject):
                     ocr.recognize(np.full((48, 160, 4), 255, np.uint8), code)
             except Exception as exc:  # noqa: BLE001
                 log.warning("OCR warm up failed: %s", exc)
-            log.info("OCR warm up %.0f ms", (time.perf_counter() - t0) * 1000)
+            try:
+                from .translate import langdetect
+
+                langdetect.warm_up()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Language detector warm up failed: %s", exc)
+            log.info("OCR and language detection warm up %.0f ms", (time.perf_counter() - t0) * 1000)
 
         self._ocr_pool.submit(run)
 
@@ -189,19 +195,21 @@ class Engine(QObject):
 
     # -- preload -------------------------------------------------------------------
     @staticmethod
-    def _pairs_for(tgt: str) -> list[tuple[str, str]]:
+    def _pairs_for(tgt: str, sources) -> list[tuple[str, str]]:
+        """Models needed to translate the given source languages into `tgt` (most likely first)."""
         pairs: list[tuple[str, str]] = []
-        for s in ("de", "en", "es"):
-            if s != tgt:
+        for s in sources:
+            if s and s != tgt:
                 for p in route(s, tgt):
                     if p not in pairs:
                         pairs.append(p)
         return pairs
 
-    def preload(self, tgt: str, download: bool) -> None:
-        """Load the models needed to translate into `tgt`; with `download`, fetch the missing
-        ones first on the download thread (translations keep working meanwhile)."""
-        pairs = self._pairs_for(tgt)
+    def preload(self, tgt: str, download: bool, sources=("en",)) -> None:
+        """Load the models to translate `sources` into `tgt`; with `download`, fetch the
+        missing ones first on the download thread (translations keep working meanwhile).
+        Other languages are downloaded only when text in them is translated."""
+        pairs = self._pairs_for(tgt, sources)
         self._tr_pool.submit(self._load_pairs, tgt, pairs)
         if download:
             missing = [p for p in pairs if self.translator.store.get(*p) is None]
@@ -245,13 +253,10 @@ class Engine(QObject):
         gc.collect()
         log.info("Released %d model(s) after inactivity", n)
 
-    def reload_models(self, tgt: str, likely_src: str | None) -> None:
-        """Load the models for `tgt` again, most likely pair first. Queued on the translation
-        thread, so a translation requested meanwhile simply waits for them (with shimmer)."""
-        pairs = self._pairs_for(tgt)
-        if likely_src and likely_src != tgt:
-            first = route(likely_src, tgt)
-            pairs = first + [p for p in pairs if p not in first]
+    def reload_models(self, tgt: str, sources) -> None:
+        """Load the models for `sources` -> `tgt` again, in order (most likely first). A
+        translation requested meanwhile waits only for the model it needs (with shimmer)."""
+        pairs = self._pairs_for(tgt, sources)
         missing = [p for p in pairs if not self.translator.is_pair_loaded(p)
                    and self.translator.store.get(*p) is not None]
         if missing:

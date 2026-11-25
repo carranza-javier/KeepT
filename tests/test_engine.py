@@ -51,7 +51,7 @@ def test_release_and_reload_most_likely_pair_first():
     wait(engine._tr_pool)
     assert tr.loaded_pairs() == []
     log.clear()
-    engine.reload_models("es", likely_src="en")
+    engine.reload_models("es", sources=["en", "de"])
     wait(engine._load_pool)
     assert [e for e in log if e[0] == "load"] == [("load", ("en", "es")), ("load", ("de", "es"))]
 
@@ -61,7 +61,7 @@ def test_translation_requested_during_reload_waits_for_models():
     results = []
     engine.translated.connect(lambda session, key, text: results.append(text), Qt.DirectConnection)
     engine.set_active(7)
-    engine.reload_models("es", likely_src="de")
+    engine.reload_models("es", sources=["de", "en"])
     engine.translate(7, [TranslationJob(1, "Hallo.", "de")], "es")
     wait(engine._tr_pool)
     wait(engine._load_pool)

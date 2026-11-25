@@ -112,6 +112,15 @@ def main() -> int:
     # Just outside the covered area nothing changed.
     c = img.pixelColor(int(target.right + 12), int(target.cy))
     assert c.red() > 240, c.name()
+    # A block in a language whose Windows OCR pack is missing is reported (once per request).
+    from keept.ocr import backend as ocr_backend
+
+    reported = []
+    ov.ocr_pack_missing.connect(reported.append)
+    missing = next(c for c in ("pl", "nl", "it", "pt", "fr") if c not in ocr_backend().available_languages())
+    ov.translate_blocks([Block([Line([Word("Zapisz zmiany", Rect(700, 500, 120, 21))])], id=50, lang=missing)])
+    ov.translate_blocks([Block([Line([Word("Save changes", Rect(700, 560, 120, 21))])], id=51, lang="en")])
+    assert reported == [missing], reported
     print("OK")
     return 0
 

@@ -125,7 +125,9 @@ class Tray:
         group = QActionGroup(target_menu)
         sys_lang = app.system_lang
         options = [("", i18n.tr("tray_system_lang", lang=i18n.lang_name(cfg.effective_target(sys_lang))))]
-        options += [(c, i18n.lang_name(c)) for c in ("de", "en", "es")]
+        from .languages import CODES
+
+        options += [(c, i18n.lang_name(c)) for c in CODES]
         for code, label in options:
             a = target_menu.addAction(label)
             a.setCheckable(True)

@@ -67,6 +67,7 @@ class Item:
 class OverlayWindow(QWidget):
     closed = Signal()
     target_changed = Signal(str)
+    ocr_pack_missing = Signal(str)  # language read without its Windows OCR pack
 
     _session_counter = 0  # global so that sessions of different overlay windows never collide
 
@@ -437,6 +438,15 @@ class OverlayWindow(QWidget):
             it.status = "pending"
             self.items[it.key] = it
         langs = Counter(it.block.lang or self.screen_lang or "en" for it in todo)
+        try:
+            from ..ocr import backend as ocr_backend
+
+            available = set(ocr_backend().available_languages())
+            for lang in langs:
+                if available and lang not in available:
+                    self.ocr_pack_missing.emit(lang)
+        except Exception:  # noqa: BLE001 - only a hint for the user
+            pass
         self.pill.set_languages(langs.most_common(1)[0][0], tgt)
         self.pill.set_original_shown(False)
         self.show_original = False

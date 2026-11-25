@@ -192,7 +192,8 @@ class WindowsServices:
 
     def system_language(self) -> str:
         langid = kernel32.GetUserDefaultUILanguage() & 0x3FF
-        return {0x07: "de", 0x09: "en", 0x0A: "es"}.get(langid, "en")
+        return {0x07: "de", 0x09: "en", 0x0A: "es", 0x0C: "fr", 0x10: "it", 0x16: "pt", 0x13: "nl",
+                0x15: "pl"}.get(langid, "en")
 
     def prefers_dark(self) -> bool:
         try:

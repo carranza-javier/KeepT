@@ -14,7 +14,9 @@ from . import i18n
 from .overlay import effects
 from .overlay.pill import SHADOW, PillButton, Separator, Theme, ui_font
 
-ENDONYMS = (("de", "Deutsch"), ("en", "English"), ("es", "Español"))
+from .languages import LANGUAGES  # noqa: E402
+
+ENDONYMS = tuple((lang.code, lang.native) for lang in LANGUAGES.values())
 
 
 class _Label(QWidget):
@@ -66,6 +68,8 @@ class LanguagePrompt(QWidget):
             b.clicked.connect(lambda c=code: self._choose(c))
             lay.addWidget(b)
             self.buttons[code] = b
+        lay.activate()
+        self.setMinimumWidth(lay.sizeHint().width())  # never squeeze the buttons
         self.adjustSize()
 
     def show_at_bottom(self) -> None:
@@ -99,6 +103,7 @@ class LanguagePrompt(QWidget):
             b.hide()
         self.findChild(Separator).hide()
         self.label.set_text(text)
+        self.setMinimumWidth(0)
         self.layout().activate()
         old_center = self.geometry().center()
         self.adjustSize()

@@ -311,7 +311,9 @@ class LangMenu(QWidget):
         m = SHADOW + 6
         lay.setContentsMargins(m, m, m, m)
         lay.setSpacing(0)
-        for code in ("de", "en", "es"):
+        from ..languages import CODES
+
+        for code in CODES:
             b = PillButton(theme, i18n.lang_name(code))
             b.clicked.connect(lambda c=code: self.chosen.emit(c))
             lay.addWidget(b)

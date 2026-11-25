@@ -15,6 +15,7 @@ import numpy as np
 from . import __version__, i18n
 from .capture import Capture, ScreenGrabber
 from .config import Config
+from .languages import LANGUAGES
 from .platform import MonitorInfo, services
 
 log = logging.getLogger("keept")
@@ -95,7 +96,9 @@ class KeepTApp:
             # Ask once which language to translate into; models are downloaded after the answer.
             QTimer.singleShot(600, self._ask_target)
         if self.config.target_chosen:  # on first run, wait for the answer
-            QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=False))
+            QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=False,
+                                                                sources=self.likely_sources()))
+            QTimer.singleShot(4000, self._cleanup_old_models)
             self._idle_timer.start()
         QTimer.singleShot(2500, self._check_ocr_languages)
         if args.open:
@@ -109,6 +112,7 @@ class KeepTApp:
                                  debug_blocks=self.args.debug_blocks or self.config.debug_blocks, screen=screen)
         ov.hint_lang = self.config.last_source_lang
         ov.closed.connect(lambda ov=ov: self._on_overlay_closed(ov))
+        ov.ocr_pack_missing.connect(self._on_ocr_pack_missing)
         ov.target_changed.connect(self._on_overlay_target)
         self.overlays[screen] = ov
 
@@ -154,7 +158,7 @@ class KeepTApp:
         self.target = code
         for ov in self.overlays.values():
             ov.target = code
-        self.engine.preload(code, download=True)
+        self.engine.preload(code, download=True, sources=self.likely_sources())
         self.prompt.confirm(i18n.tr("onboard_done", hotkey=i18n.hotkey_label(self.config.hotkey)))
         log.info("First run: target language %s chosen", code)
 
@@ -168,16 +172,36 @@ class KeepTApp:
         except Exception as exc:  # noqa: BLE001
             log.error("Cannot query OCR languages: %s", exc)
             available = []
-        missing = [c for c in ("de", "en", "es") if c not in available]
         log.info("OCR languages available: %s", available)
-        if not missing:
+        # Missing packs for single languages are reported when text in them is translated;
+        # at startup only warn when Windows cannot read any supported language at all.
+        if available:
             return
-        tags = {"de": "de-DE", "en": "en-US", "es": "es-ES"}
-        names = ", ".join(i18n.lang_name(c) for c in missing)
-        self.tray.notify(i18n.tr("ocr_missing_title"), i18n.tr("ocr_missing_body", langs=names, tag=tags[missing[0]]),
-                         warning=True)
+        tag = LANGUAGES.get(self.system_lang, LANGUAGES["en"]).ocr_tag
+        self.tray.notify(i18n.tr("ocr_missing_title"),
+                         i18n.tr("ocr_missing_body", langs=i18n.lang_name(self.system_lang), tag=tag), warning=True)
         self.config.ocr_warning_shown = True
         self.config.save()
+
+    def _on_ocr_pack_missing(self, lang: str) -> None:
+        if lang in self.config.ocr_warned:
+            return
+        info = LANGUAGES.get(lang)
+        if info is None:
+            return
+        self.tray.notify(i18n.tr("ocr_missing_title"),
+                         i18n.tr("ocr_missing_one", lang=info.native, tag=info.ocr_tag), warning=True)
+        self.config.ocr_warned.append(lang)
+        self.config.save()
+        log.info("Reported missing OCR pack for %s", lang)
+
+    def likely_sources(self) -> list[str]:
+        """Languages the user most likely reads: last one seen, the Windows one, English."""
+        out = []
+        for code in (self.config.last_source_lang, self.system_lang, "en"):
+            if code in LANGUAGES and code != self.target and code not in out:
+                out.append(code)
+        return out
 
     # -- actions ---------------------------------------------------------------------
     def trigger(self, t_hotkey: float | None = None) -> None:
@@ -188,7 +212,7 @@ class KeepTApp:
         t0 = t_hotkey or time.perf_counter()
         self._idle_timer.stop()
         # Start reloading released models right away, in parallel with capture and OCR.
-        self.engine.reload_models(self.target, self.config.last_source_lang)
+        self.engine.reload_models(self.target, self.likely_sources())
         try:
             capture = self._capture()
         except Exception:  # noqa: BLE001
@@ -218,13 +242,15 @@ class KeepTApp:
         self.target = self.config.effective_target(self.system_lang)
         for ov in self.overlays.values():
             ov.target = self.target
-        self.engine.preload(self.target, download=False)
+        # Choosing a target downloads (once) the models for the languages the user usually reads.
+        self.engine.preload(self.target, download=True, sources=self.likely_sources())
 
     def _on_overlay_target(self, code: str) -> None:
         self.config.target_lang = code
         self.target = code
         for ov in self.overlays.values():
             ov.target = code
+        self.engine.preload(code, download=True, sources=self.likely_sources())
         self.config.save()
 
     def set_hotkey(self, text: str) -> None:
@@ -284,6 +310,25 @@ class KeepTApp:
             self.tray.update_tooltip("")
         else:
             self.tray.update_tooltip(i18n.tr("downloading", pct=int(fraction * 100)))
+
+    def _cleanup_old_models(self) -> None:
+        """Remove model folders that are not OPUS-MT models of the catalog (older Argos ones)."""
+        import shutil
+        import threading
+
+        store = self.engine.translator.store
+
+        def run():
+            if not store.root.exists():
+                return
+            for d in store.root.iterdir():
+                if d.is_dir() and not d.name.startswith(".") and "_" in d.name:
+                    src, _, tgt = d.name.partition("_")
+                    if store.get(src, tgt) is None and store.download_progress(src, tgt) is None:
+                        shutil.rmtree(d, ignore_errors=True)
+                        log.info("Removed obsolete model folder %s", d.name)
+
+        threading.Thread(target=run, name="keept-cleanup", daemon=True).start()
 
     def _release_if_idle(self) -> None:
         if self._open_overlay() is None:

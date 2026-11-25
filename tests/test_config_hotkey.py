@@ -41,14 +41,15 @@ def test_config_tolerates_garbage(tmp_path):
     path = tmp_path / "config.json"
     path.write_text("{not json", encoding="utf-8")
     assert Config.load(path) == Config()
-    path.write_text('{"target_lang": "fr", "unknown": 1, "last_source_lang": "xx"}', encoding="utf-8")
+    path.write_text('{"target_lang": "ja", "unknown": 1, "last_source_lang": "xx"}', encoding="utf-8")
     cfg = Config.load(path)
     assert cfg.target_lang == "" and cfg.last_source_lang == "en"
 
 
 def test_effective_target():
     assert Config().effective_target("de") == "de"
-    assert Config().effective_target("fr") == "en"
+    assert Config().effective_target("ja") == "en"
+    assert Config().effective_target("fr") == "fr"
     assert Config(target_lang="es").effective_target("de") == "es"
 
 

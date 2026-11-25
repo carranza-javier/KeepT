@@ -11,7 +11,7 @@ from .paths import config_dir
 
 log = logging.getLogger(__name__)
 
-SUPPORTED_LANGS = ("de", "en", "es")
+from .languages import CODES as SUPPORTED_LANGS  # noqa: E402
 
 
 @dataclass
@@ -27,6 +27,11 @@ class Config:
     # Disables MKL weight pre-packing in CTranslate2: committed memory drops from 2-3.3 GB to
     # ~0.6 GB, translation gets ~20 % slower. RAM in Task Manager is the same either way.
     low_memory: bool = False
+    ocr_warned: list = None  # languages whose missing OCR pack was already reported
+
+    def __post_init__(self):
+        if self.ocr_warned is None:
+            self.ocr_warned = []
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Config":
