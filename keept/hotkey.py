@@ -53,7 +53,10 @@ class Hotkey:
         return {"Win", "Alt"} <= self.modifiers
 
 
-PRESETS = ("Ctrl+Alt+T", "Ctrl+Shift+T", "Ctrl+Alt+Q", "Ctrl+Shift+Space", "Alt+Q")
+DEFAULT = "F1"
+# Used when F1 cannot be registered (taken by another app, or a laptop that only sends F1 with Fn).
+FALLBACK = "Ctrl+Alt+T"
+PRESETS = ("F1", "Ctrl+Alt+T", "Ctrl+Shift+T", "Ctrl+Alt+Q", "Ctrl+Shift+Space", "Alt+Q")
 
 
 class HotkeyService(QObject):

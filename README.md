@@ -14,7 +14,7 @@ no API keys, and nothing leaves your PC.
 
 - The installer is per user: no administrator rights are needed. It can start KeepT with Windows.
 - Every release lists the SHA-256 of the installer. To check it in PowerShell:
-  `Get-FileHash .\KeepT-Setup-1.0.0.exe -Algorithm SHA256`
+  `Get-FileHash .\KeepT-Setup-1.0.1.exe -Algorithm SHA256`
 - **Windows SmartScreen:** until the code signing certificate is approved (see
   [Code signing policy](#code-signing-policy)), the installer is not signed and Windows may show
   "Windows protected your PC". Click **More info** and then **Run anyway**. The installer is built
@@ -24,8 +24,10 @@ no API keys, and nothing leaves your PC.
 ## How to use
 
 On the first start KeepT asks which language to translate into (you can change it any time).
-Then press **`Ctrl+Alt+T`**: the monitor under the mouse freezes with a glowing border and the
-text is read in the background.
+Then press **`F1`**: the monitor under the mouse freezes with a glowing border and the text is
+read in the background. You can change the shortcut from the tray menu. On laptops where F1 is a
+media key, press `Fn+F1` or pick another shortcut; if F1 cannot be registered at all (another app
+holds it), KeepT switches to `Ctrl+Alt+T` and tells you.
 
 | Action | Result |
 | --- | --- |

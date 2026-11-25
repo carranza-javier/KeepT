@@ -104,6 +104,19 @@ _STRINGS = {
         "en": "Press {hotkey} to translate text on your screen.",
         "es": "Pulsa {hotkey} para traducir el texto de la pantalla.",
     },
+    "onboard_hotkey": {
+        "de": "Kürzel: {hotkey} (du kannst es ändern)",
+        "en": "Shortcut: {hotkey} (you can change it)",
+        "es": "Atajo: {hotkey} (puedes cambiarlo)",
+    },
+    "hotkey_fallback": {
+        "de": "{hotkey} ist nicht verfügbar (eine andere App nutzt es, oder die Tastatur sendet es nur mit Fn). "
+              "KeepT verwendet jetzt {fallback}. Du kannst es im Menü ändern.",
+        "en": "{hotkey} is not available (another app uses it, or the keyboard only sends it with Fn). "
+              "KeepT now uses {fallback}. You can change it from the menu.",
+        "es": "{hotkey} no está disponible (otra aplicación la usa o el teclado solo la envía con Fn). "
+              "KeepT usa ahora {fallback}. Puedes cambiarlo desde el menú.",
+    },
     "hotkey_busy": {
         "de": "Das Kürzel {hotkey} wird bereits von einer anderen App verwendet. Wähle im Menü ein anderes.",
         "en": "The shortcut {hotkey} is already used by another app. Pick another one from the menu.",

@@ -62,3 +62,70 @@ def test_hotkey_label_is_localised():
     assert i18n.hotkey_label("Ctrl+Shift+Space") == "Ctrl+Mayús+Espacio"
     i18n.set_ui_lang("en")
     assert i18n.hotkey_label("Ctrl+Alt+T") == "Ctrl+Alt+T"
+
+
+def test_default_hotkey_is_f1_alone():
+    from keept.platform.win32 import MOD_NOREPEAT, hotkey_to_win32
+
+    assert Config().hotkey == "F1"
+    hk = Hotkey.parse(Config().hotkey)
+    assert hk.modifiers == frozenset() and hk.key == "F1"
+    assert hotkey_to_win32(hk) == (MOD_NOREPEAT, 0x70)
+
+
+def test_old_default_moves_to_f1_once(tmp_path):
+    import json
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"hotkey": "Ctrl+Alt+T", "target_lang": "es"}), encoding="utf-8")
+    assert Config.load(path).hotkey == "F1"
+    # a shortcut the user picked is never changed
+    path.write_text(json.dumps({"hotkey": "Ctrl+Alt+T", "hotkey_chosen": True}), encoding="utf-8")
+    assert Config.load(path).hotkey == "Ctrl+Alt+T"
+    path.write_text(json.dumps({"hotkey": "Ctrl+Shift+Space"}), encoding="utf-8")
+    assert Config.load(path).hotkey == "Ctrl+Shift+Space"
+
+
+class _Recorder:
+    def __init__(self):
+        self.notes, self.registered = [], []
+
+    def notify(self, title, body, warning=False, url=None):
+        self.notes.append(body)
+
+    def update_tooltip(self, *a):
+        pass
+
+    def set_hotkey(self, hk):
+        self.registered.append(str(hk))
+
+
+def _fake_app(cfg):
+    from types import SimpleNamespace
+
+    rec = _Recorder()
+    cfg.save = lambda *a: None
+    return SimpleNamespace(config=cfg, tray=rec, hotkeys=rec, _hotkey_previous=None, hotkey_ok=True), rec
+
+
+def test_f1_unavailable_falls_back_to_ctrl_alt_t():
+    from keept import i18n
+    from keept.app import KeepTApp
+
+    i18n.set_ui_lang("es")
+    app, rec = _fake_app(Config())
+    KeepTApp._on_hotkey_status(app, False, "F1")
+    assert app.config.hotkey == "Ctrl+Alt+T" and rec.registered == ["Ctrl+Alt+T"]
+    assert "F1" in rec.notes[0] and "Ctrl+Alt+T" in rec.notes[0]
+    assert app.config.hotkey_chosen  # the next start keeps Ctrl+Alt+T instead of warning again
+    # if the fallback is also taken there is no loop: the usual "busy" warning
+    KeepTApp._on_hotkey_status(app, False, "Ctrl+Alt+T")
+    assert rec.registered == ["Ctrl+Alt+T"] and app.hotkey_ok is False
+
+
+def test_chosen_hotkey_failure_does_not_fall_back():
+    from keept.app import KeepTApp
+
+    app, rec = _fake_app(Config(hotkey="F1", hotkey_chosen=True))
+    KeepTApp._on_hotkey_status(app, False, "F1")
+    assert rec.registered == [] and app.hotkey_ok is False

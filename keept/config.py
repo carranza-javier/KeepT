@@ -13,10 +13,13 @@ log = logging.getLogger(__name__)
 
 from .languages import CODES as SUPPORTED_LANGS  # noqa: E402
 
+OLD_DEFAULT_HOTKEY = "Ctrl+Alt+T"  # default up to 1.0.0
+
 
 @dataclass
 class Config:
-    hotkey: str = "Ctrl+Alt+T"
+    hotkey: str = "F1"
+    hotkey_chosen: bool = False  # the user picked the shortcut (otherwise it follows the default)
     target_lang: str = ""  # empty means "use the Windows language"
     autostart: bool = True
     last_source_lang: str = "en"
@@ -53,6 +56,8 @@ class Config:
             cfg.target_lang = ""
         if cfg.last_source_lang not in SUPPORTED_LANGS:
             cfg.last_source_lang = "en"
+        if not cfg.hotkey_chosen and cfg.hotkey == OLD_DEFAULT_HOTKEY:
+            cfg.hotkey = cls.hotkey  # 1.0.0 saved its default; move to the new default once
         return cfg
 
     def save(self, path: Path | None = None) -> None:

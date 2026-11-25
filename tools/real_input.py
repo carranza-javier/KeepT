@@ -26,7 +26,7 @@ INPUT_MOUSE, INPUT_KEYBOARD = 0, 1
 KEYEVENTF_KEYUP = 0x2
 MOUSEEVENTF_MOVE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x1, 0x2, 0x4
 MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_VIRTUALDESK = 0x8000, 0x4000
-VK = {"Return": 0x0D, "Escape": 0x1B, "Space": 0x20, "Ctrl": 0x11, "Alt": 0x12, "T": 0x54}
+VK = {"F1": 0x70, "Return": 0x0D, "Escape": 0x1B, "Space": 0x20, "Ctrl": 0x11, "Alt": 0x12, "T": 0x54}
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -92,7 +92,13 @@ def move_abs(x, y, flags=0):
 
 def main():
     cmd = sys.argv[1]
-    if cmd == "hotkey":
+    if cmd == "hotkey" and sys.argv[2:] == ["F1"]:
+        # F1 alone: only sent while the test screen is in front, so no other app gets a Help key.
+        if _title(user32.GetForegroundWindow()) != "Test screen":
+            print("refused: the test screen is not in front")
+            return
+        _send(key_input(VK["F1"]), key_input(VK["F1"], True))
+    elif cmd == "hotkey":
         _send(key_input(VK["Ctrl"]), key_input(VK["Alt"]), key_input(VK["T"]),
               key_input(VK["T"], True), key_input(VK["Alt"], True), key_input(VK["Ctrl"], True))
     elif cmd == "key":

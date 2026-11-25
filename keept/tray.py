@@ -192,6 +192,9 @@ class Tray:
         m.addAction(i18n.tr("tray_about")).triggered.connect(self._about)
         m.addAction(i18n.tr("tray_quit")).triggered.connect(app.quit)
 
+    def change_hotkey(self) -> None:
+        self._custom_hotkey()
+
     def _custom_hotkey(self) -> None:
         dlg = HotkeyDialog(self.app.config.hotkey)
         if dlg.exec() == QDialog.Accepted and dlg.result_text:

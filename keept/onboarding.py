@@ -20,33 +20,53 @@ ENDONYMS = tuple((lang.code, lang.native) for lang in LANGUAGES.values())
 
 
 class _Label(QWidget):
-    def __init__(self, theme: Theme, text: str, parent=None):
+    """Title with the sparkle icon and, optionally, a smaller clickable line below it."""
+
+    clicked_hint = Signal()
+
+    def __init__(self, theme: Theme, text: str, hint: str | None = None, parent=None):
         super().__init__(parent)
         self.theme = theme
-        self.text = text
         self.font = ui_font(14, QFont.DemiBold)
-        w = QFontMetricsF(self.font).horizontalAdvance(text)
-        self.setFixedSize(int(w + 16 + 26 + 8), 40)
+        self.hint_font = ui_font(11.5)
+        self.set_text(text, hint)
 
-    def set_text(self, text: str) -> None:
-        self.text = text
+    def set_text(self, text: str, hint: str | None = None) -> None:
+        self.text, self.hint = text, hint
         w = QFontMetricsF(self.font).horizontalAdvance(text)
-        self.setFixedSize(int(w + 16 + 26 + 8), 40)
+        if hint:
+            w = max(w, QFontMetricsF(self.hint_font).horizontalAdvance(hint))
+        self.setFixedSize(int(w + 16 + 26 + 8), 52 if hint else 40)
+        self.setCursor(Qt.PointingHandCursor if hint else Qt.ArrowCursor)
         self.update()
+
+    def mouseReleaseEvent(self, e):
+        if self.hint and e.position().y() > self.height() / 2:
+            self.clicked_hint.emit()
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        effects.icon_sparkle(p, QRectF(14, 11, 18, 18), self.theme.text)
+        h = self.height()
+        title_h = 30 if self.hint else h
+        effects.icon_sparkle(p, QRectF(14, (title_h - 18) / 2 + (3 if self.hint else 0), 18, 18), self.theme.text)
         p.setFont(self.font)
         p.setPen(self.theme.text)
-        p.drawText(QRectF(42, 0, self.width() - 42, 40), Qt.AlignVCenter | Qt.AlignLeft, self.text)
+        p.drawText(QRectF(42, 3 if self.hint else 0, self.width() - 42, title_h), Qt.AlignVCenter | Qt.AlignLeft,
+                   self.text)
+        if self.hint:
+            dim = QColor(self.theme.text)
+            dim.setAlphaF(0.68)
+            p.setFont(self.hint_font)
+            p.setPen(dim)
+            p.drawText(QRectF(42, 29, self.width() - 42, h - 33), Qt.AlignVCenter | Qt.AlignLeft, self.hint)
 
 
 class LanguagePrompt(QWidget):
     chosen = Signal(str)
+    hint_clicked = Signal()
 
-    def __init__(self, dark: bool, suggested: str):
+    def __init__(self, dark: bool, suggested: str, hint: str | None = None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
         self.setWindowTitle("KeepT setup")
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -55,7 +75,8 @@ class LanguagePrompt(QWidget):
         # A floating window over arbitrary content needs a more opaque background than the
         # overlay pill (which always sits on the frozen, dimmed screenshot).
         self.theme.bg.setAlpha(255)
-        self.label = _Label(self.theme, i18n.tr("onboard_title"))
+        self.label = _Label(self.theme, i18n.tr("onboard_title"), hint)
+        self.label.clicked_hint.connect(self.hint_clicked)
         lay = QHBoxLayout(self)
         m = SHADOW + 6
         lay.setContentsMargins(m, m, m, m)

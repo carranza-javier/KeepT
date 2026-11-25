@@ -38,6 +38,7 @@ class KeepTApp:
         from PySide6.QtCore import QTimer
 
         from .engine import Engine
+        from .hotkey import DEFAULT as DEFAULT_HOTKEY
         from .hotkey import Hotkey, HotkeyService
         from .overlay.overlay_window import OverlayWindow
         from .tray import Tray
@@ -83,7 +84,7 @@ class KeepTApp:
         try:
             hotkey = Hotkey.parse(self.config.hotkey)
         except ValueError:
-            hotkey = Hotkey.parse("Ctrl+Alt+T")
+            hotkey = Hotkey.parse(DEFAULT_HOTKEY)
             self.config.hotkey = str(hotkey)
         self.hotkeys.start(hotkey)
 
@@ -155,8 +156,10 @@ class KeepTApp:
     def _ask_target(self) -> None:
         from .onboarding import LanguagePrompt
 
-        self.prompt = LanguagePrompt(services().prefers_dark(), self.target)
+        self.prompt = LanguagePrompt(services().prefers_dark(), self.target,
+                                     hint=i18n.tr("onboard_hotkey", hotkey=i18n.hotkey_label(self.config.hotkey)))
         self.prompt.chosen.connect(self._on_target_chosen)
+        self.prompt.hint_clicked.connect(self.tray.change_hotkey)
         self.prompt.show_at_bottom()
 
     def _on_target_chosen(self, code: str) -> None:
@@ -282,6 +285,7 @@ class KeepTApp:
             return
         self._hotkey_previous = old
         self.config.hotkey = str(hk)
+        self.config.hotkey_chosen = True
         self.config.save()
         self.hotkeys.set_hotkey(hk)
         self.tray.update_tooltip()
@@ -298,9 +302,21 @@ class KeepTApp:
     def _on_hotkey_status(self, ok: bool, text: str) -> None:
         from .hotkey import Hotkey
 
+        from .hotkey import FALLBACK
+
         previous, self._hotkey_previous = self._hotkey_previous, None
         if ok:
             self.hotkey_ok = True
+            log.info("Shortcut active: %s", text)
+        elif not self.config.hotkey_chosen and text != FALLBACK:
+            # The default (F1) could not be registered: use Ctrl+Alt+T and say so clearly.
+            log.warning("Default shortcut %s unavailable, falling back to %s", text, FALLBACK)
+            self.tray.notify("KeepT", i18n.tr("hotkey_fallback", hotkey=i18n.hotkey_label(text),
+                                              fallback=i18n.hotkey_label(FALLBACK)), warning=True)
+            self.config.hotkey = FALLBACK
+            self.config.hotkey_chosen = True  # settled: do not retry F1 (and warn) on every start
+            self.config.save()
+            self.hotkeys.set_hotkey(Hotkey.parse(FALLBACK))
         elif previous and previous != text:
             # Lost a race with another app between the check and the registration: go back.
             self.tray.notify("KeepT", i18n.tr("hotkey_taken_kept", new=i18n.hotkey_label(text),
