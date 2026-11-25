@@ -180,7 +180,8 @@ class Engine(QObject):
                 self.progress.emit(session, "download", n / len(pairs))
                 tr.model(pair, progress)
             else:
-                self.progress.emit(session, "loading", -1.0)
+                # Models on disk load in about a second; the pending blocks already show the
+                # shimmer, so no extra message is needed.
                 tr.model(pair)
 
     # -- preload -------------------------------------------------------------------
@@ -228,6 +229,39 @@ class Engine(QObject):
                 log.warning("Background download of %s->%s failed: %s", *pair, exc)
         self.preload_status.emit("", -1.0)
         self._tr_pool.submit(self._load_pairs, tgt, pairs)
+
+    # -- release after inactivity / reload on demand -----------------------------------
+    def release_models(self) -> None:
+        """Free the translation models (runs on the translation thread, so never mid job)."""
+        self._tr_pool.submit(self._run_release)
+
+    def _run_release(self) -> None:
+        import gc
+
+        n = self.translator.unload_all()
+        gc.collect()
+        log.info("Released %d model(s) after inactivity", n)
+
+    def reload_models(self, tgt: str, likely_src: str | None) -> None:
+        """Load the models for `tgt` again, most likely pair first. Queued on the translation
+        thread, so a translation requested meanwhile simply waits for them (with shimmer)."""
+        pairs = self._pairs_for(tgt)
+        if likely_src and likely_src != tgt:
+            first = route(likely_src, tgt)
+            pairs = first + [p for p in pairs if p not in first]
+        missing = [p for p in pairs if not self.translator.is_pair_loaded(p)
+                   and self.translator.store.get(*p) is not None]
+        if missing:
+            self._tr_pool.submit(self._run_reload, tgt, missing)
+
+    def _run_reload(self, tgt: str, pairs) -> None:
+        t0 = time.perf_counter()
+        for pair in pairs:
+            try:
+                self.translator.model(pair)
+            except Exception as exc:  # noqa: BLE001 - a translation will report it if needed
+                log.warning("Reload of %s->%s failed: %s", *pair, exc)
+        log.info("Reloaded %d model(s) for target %s in %.0f ms", len(pairs), tgt, (time.perf_counter() - t0) * 1000)
 
     def shutdown(self) -> None:
         self.set_active(-1)

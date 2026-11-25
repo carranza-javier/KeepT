@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -17,6 +18,8 @@ from .config import Config
 from .platform import MonitorInfo, services
 
 log = logging.getLogger("keept")
+
+IDLE_RELEASE_MS = int(float(os.environ.get("KEEPT_IDLE_RELEASE_S", "600")) * 1000)  # env: tests only
 
 
 def load_image_bgra(path: str) -> np.ndarray:
@@ -60,6 +63,13 @@ class KeepTApp:
 
         self.tray = Tray(self)
 
+        # Free the models after 10 minutes without using KeepT (one single shot timer, armed
+        # only after the overlay closes); the hotkey reloads them in the background.
+        self._idle_timer = QTimer()
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.setInterval(IDLE_RELEASE_MS)
+        self._idle_timer.timeout.connect(self._release_if_idle)
+
         self.hotkeys = HotkeyService(plat.hotkey_backend())
         self.hotkeys.activated.connect(self.trigger)
         self.hotkeys.status.connect(self._on_hotkey_status)
@@ -84,6 +94,7 @@ class KeepTApp:
             QTimer.singleShot(600, self._ask_target)
         if self.config.target_chosen:  # on first run, wait for the answer
             QTimer.singleShot(1500, lambda: self.engine.preload(self.target, download=False))
+            self._idle_timer.start()
         QTimer.singleShot(2500, self._check_ocr_languages)
         if args.open:
             QTimer.singleShot(300, self.trigger)
@@ -173,6 +184,9 @@ class KeepTApp:
             current.close_overlay()
             return
         t0 = t_hotkey or time.perf_counter()
+        self._idle_timer.stop()
+        # Start reloading released models right away, in parallel with capture and OCR.
+        self.engine.reload_models(self.target, self.config.last_source_lang)
         try:
             capture = self._capture()
         except Exception:  # noqa: BLE001
@@ -242,7 +256,12 @@ class KeepTApp:
         else:
             self.tray.update_tooltip(i18n.tr("downloading", pct=int(fraction * 100)))
 
+    def _release_if_idle(self) -> None:
+        if self._open_overlay() is None:
+            self.engine.release_models()
+
     def _on_overlay_closed(self, ov) -> None:
+        self._idle_timer.start()
         for other in self.overlays.values():
             other.hint_lang = ov.hint_lang
         if ov.hint_lang != self.config.last_source_lang:

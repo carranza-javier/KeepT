@@ -105,6 +105,17 @@ class Translator:
             self._models.pop((src, tgt), None)
         self._cache.clear()
 
+    def unload_all(self) -> int:
+        """Drop every loaded model (memory is returned when the CTranslate2 objects go away).
+        The translation cache is kept: it is small and makes repeated texts instant."""
+        with self._load_lock:
+            n = len(self._models)
+            self._models.clear()
+        return n
+
+    def loaded_pairs(self) -> list[tuple[str, str]]:
+        return list(self._models)
+
     def prepare(self, src: str, tgt: str, progress: Progress | None = None) -> None:
         """Download (if needed) and load every model on the route src -> tgt."""
         for pair in route(src, tgt):
