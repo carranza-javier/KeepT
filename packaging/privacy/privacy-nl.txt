@@ -1,0 +1,11 @@
+﻿Privacyverklaring van KeepT
+
+KeepT leest en vertaalt de tekst op je scherm volledig op je computer. Schermafbeeldingen, herkende tekst en vertalingen verlaten je pc nooit. Er zijn geen accounts en er is geen telemetrie.
+
+KeepT maakt alleen voor twee dingen verbinding met internet:
+
+1. Vertaalmodellen downloaden, de eerste keer dat een taalpaar nodig is. Ze komen uit de KeepT-release op GitHub (github.com/carranza-javier/KeepT, release "models-v1") of, als GitHub niet bereikbaar is, van de officiële OPUS-MT-servers van de Universiteit van Helsinki (object.pouta.csc.fi). Alleen het modelbestand wordt opgevraagd.
+
+2. Controleren op nieuwe KeepT-versies, hoogstens één keer per dag, via de openbare GitHub-API. Er wordt geen informatie over jou of je scherm verzonden. Je kunt dit uitschakelen op de volgende pagina van dit installatieprogramma of later in het menu in het systeemvak ("Controleren op updates").
+
+GitHub en de servers van de Universiteit van Helsinki kunnen de verzoeken die ze ontvangen vastleggen (bijvoorbeeld je IP-adres), zoals beschreven in hun eigen privacybeleid.

@@ -22,8 +22,6 @@ VersionInfoProductVersion={#AppVersion}
 VersionInfoDescription=KeepT screen translator installer
 VersionInfoCompany=KettenKI
 VersionInfoCopyright=© 2026 Javier Carranza
-; Privacy notice shown before installing (what KeepT sends over the network and how to turn it off)
-InfoBeforeFile=..\packaging\privacy.txt
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -40,19 +38,38 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=force
 RestartApplications=no
+; The installer starts in the Windows display language, or in English when it is none of the eight.
+LanguageDetectionMethod=uilanguage
 
+; Each language shows the privacy notice (what KeepT sends over the network and how to turn it
+; off) before installing.
 [Languages]
-Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "de"; MessagesFile: "compiler:Languages\German.isl"
-Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
+Name: "en"; MessagesFile: "compiler:Default.isl"; InfoBeforeFile: "..\packaging\privacy\privacy-en.txt"
+Name: "de"; MessagesFile: "compiler:Languages\German.isl"; InfoBeforeFile: "..\packaging\privacy\privacy-de.txt"
+Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"; InfoBeforeFile: "..\packaging\privacy\privacy-es.txt"
+Name: "fr"; MessagesFile: "compiler:Languages\French.isl"; InfoBeforeFile: "..\packaging\privacy\privacy-fr.txt"
+Name: "it"; MessagesFile: "compiler:Languages\Italian.isl"; InfoBeforeFile: "..\packaging\privacy\privacy-it.txt"
+Name: "pt"; MessagesFile: "compiler:Languages\Portuguese.isl"; InfoBeforeFile: "..\packaging\privacy\privacy-pt.txt"
+Name: "nl"; MessagesFile: "compiler:Languages\Dutch.isl"; InfoBeforeFile: "..\packaging\privacy\privacy-nl.txt"
+Name: "pl"; MessagesFile: "compiler:Languages\Polish.isl"; InfoBeforeFile: "..\packaging\privacy\privacy-pl.txt"
 
 [CustomMessages]
 en.Autostart=Start KeepT with Windows
 de.Autostart=KeepT mit Windows starten
 es.Autostart=Iniciar KeepT con Windows
+fr.Autostart=Démarrer KeepT avec Windows
+it.Autostart=Avvia KeepT con Windows
+pt.Autostart=Iniciar o KeepT com o Windows
+nl.Autostart=KeepT starten met Windows
+pl.Autostart=Uruchamiaj KeepT razem z systemem Windows
 en.Updates=Check for new KeepT versions on GitHub (once a day)
 de.Updates=Einmal täglich auf GitHub nach neuen KeepT-Versionen suchen
 es.Updates=Buscar nuevas versiones de KeepT en GitHub (una vez al día)
+fr.Updates=Rechercher les nouvelles versions de KeepT sur GitHub (une fois par jour)
+it.Updates=Cerca nuove versioni di KeepT su GitHub (una volta al giorno)
+pt.Updates=Procurar novas versões do KeepT no GitHub (uma vez por dia)
+nl.Updates=Op GitHub controleren op nieuwe KeepT-versies (één keer per dag)
+pl.Updates=Sprawdzaj nowe wersje KeepT na GitHubie (raz dziennie)
 
 [Tasks]
 Name: "autostart"; Description: "{cm:Autostart}"

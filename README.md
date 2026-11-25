@@ -39,6 +39,8 @@ The tray menu also has the target language, start with Windows, the update check
 
 KeepT translates between German, English, Spanish, French, Italian, Portuguese, Dutch and Polish, in any direction. It uses a direct OPUS-MT model where one exists and goes through English otherwise.
 
+The app and the installer are also available in these eight languages. They follow the Windows display language and use English when Windows is in any other language.
+
 No model ships with KeepT. Each one (about 80 to 250 MB) is downloaded the first time it is needed: when you pick a target language, or the first time you translate text in a new language. Models are kept in `%LOCALAPPDATA%\KeepT\models` and can be deleted from the tray. After 10 minutes without use KeepT frees them from memory, and it reloads them in the background as soon as you press the shortcut.
 
 Text recognition uses the OCR built into Windows. If the OCR pack for a language is missing, KeepT tells you how to add it (Settings > Time & language > Language).

@@ -1,0 +1,11 @@
+﻿Aviso de privacidad de KeepT
+
+KeepT lee y traduce el texto de tu pantalla por completo en tu ordenador. Las capturas, el texto reconocido y las traducciones nunca salen de tu PC. No hay cuentas ni telemetría.
+
+KeepT solo se conecta a internet para dos cosas:
+
+1. Descargar modelos de traducción, la primera vez que hace falta un par de idiomas. Vienen de la release de KeepT en GitHub (github.com/carranza-javier/KeepT, release "models-v1") o, si no se puede acceder a GitHub, de los servidores oficiales de OPUS-MT de la Universidad de Helsinki (object.pouta.csc.fi). Solo se pide el archivo del modelo.
+
+2. Buscar nuevas versiones de KeepT, como mucho una vez al día, consultando la API pública de GitHub. No se envía ninguna información sobre ti ni sobre tu pantalla. Puedes desactivarlo en la página siguiente de este instalador o más adelante en el menú de la bandeja ("Buscar actualizaciones").
+
+GitHub y los servidores de la Universidad de Helsinki pueden registrar las peticiones que reciben (por ejemplo, tu dirección IP), según sus propias políticas de privacidad.
