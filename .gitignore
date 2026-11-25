@@ -1,11 +1,14 @@
-# Local docs (only README.md is versioned)
+# Local docs: only README.md is versioned
 *.md
 !README.md
+CLAUDE.md
+DECISIONS.md
 
 # Python
 __pycache__/
 *.py[cod]
 .venv/
+.venv-*/
 .pytest_cache/
 
 # Build output
@@ -14,6 +17,17 @@ dist/
 installer/Output/
 *.spec.bak
 
+# Translation models and other heavy downloads (KeepT downloads them at run time)
+models/
+*.argosmodel
+*.zip
+*.npz
+*.bin
+*.pt
+*.safetensors
+*.spm
+
 # Local artifacts
 shots/
 *.log
+.claude/
