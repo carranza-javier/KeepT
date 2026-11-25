@@ -55,6 +55,8 @@ jobs:
         run: |
           $p = Start-Process dist/KeepT/KeepT.exe -ArgumentList "--version" -Wait -PassThru -NoNewWindow
           if ($p.ExitCode -ne 0) { throw "KeepT.exe --version failed ($($p.ExitCode))" }
+          $m = Get-Content dist/KeepT/_internal/keept/translate/models_manifest.json -Raw | ConvertFrom-Json
+          if (-not $m.base_url -or @($m.models.PSObject.Properties).Count -eq 0) { throw "The models manifest is missing or empty" }
 
       # -- Code signing of KeepT.exe (SignPath, off until approved) ----------------------
       - name: Upload unsigned app for signing
