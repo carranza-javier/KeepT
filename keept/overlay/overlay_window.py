@@ -429,6 +429,28 @@ class OverlayWindow(QWidget):
         item.meta["button"] = button
         return item
 
+    def _usable_language(self, block: Block, tgt: str) -> str:
+        """Avoid downloading a model because of an unsure guess: if the detected language has no
+        installed model and the evidence is weak (short text, probability < 0.9), use the most
+        likely language among those that can already be translated (or the target itself)."""
+        lang = block.lang or self.screen_lang or "en"
+        translator = getattr(self.engine, "translator", None)
+        if translator is None or lang == tgt:
+            return lang
+        from ..translate import langdetect
+        from ..translate.translator import route
+
+        def ready(src: str) -> bool:
+            return src == tgt or all(translator.store.get(*p) for p in route(src, tgt))
+
+        if ready(lang):
+            return lang
+        probs = langdetect.scores(block.text)
+        if probs.get(lang, 0.0) >= 0.9 or len(block.text.split()) >= 8:
+            return lang  # clear evidence: worth downloading the model
+        usable = {code: p for code, p in probs.items() if ready(code)}
+        return max(usable, key=usable.get) if usable else lang
+
     def translate_blocks(self, blocks: list[Block]) -> None:
         tgt = self.target
         new: list[Item] = []
@@ -442,6 +464,8 @@ class OverlayWindow(QWidget):
             new.append(self._make_item(b))
         if not new:
             return
+        for it in new:
+            it.block.lang = self._usable_language(it.block, tgt)
         todo = [it for it in new if (it.block.lang or self.screen_lang) != tgt and not looks_untranslatable(it.block.text)]
         if not todo:
             if not any(it.status == "done" for it in self.items.values()):

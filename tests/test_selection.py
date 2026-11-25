@@ -96,3 +96,27 @@ def test_file_names_urls_and_mail_are_not_translated():
         assert looks_untranslatable(text), text
     for text in ("Dateiordner", "Release notes", "Version 2.5 ist da.", "Datei.  Weiter"):
         assert not looks_untranslatable(text), text
+
+
+def test_unsure_language_without_model_does_not_trigger_a_download():
+    from types import SimpleNamespace
+
+    from conftest import make_line
+
+    from keept.ocr.layout import Block
+    from keept.overlay.overlay_window import OverlayWindow
+
+    installed = {("de", "es"), ("en", "es")}
+    store = SimpleNamespace(get=lambda s, t: object() if (s, t) in installed else None)
+    fake = SimpleNamespace(engine=SimpleNamespace(translator=SimpleNamespace(store=store)), screen_lang="de")
+
+    def lang_for(text, detected):
+        block = Block([make_line(text, 0, 0)], lang=detected)
+        return OverlayWindow._usable_language(fake, block, "es")
+
+    # Truncated Explorer text guessed as Italian with low confidence: no it->es download.
+    assert lang_for("Python File (no cons...", "it") in ("de", "en", "es")
+    # A clear, long Italian sentence still asks for the Italian model.
+    assert lang_for("Impossibile salvare il file perché il disco è pieno, riprova più tardi per favore.", "it") == "it"
+    # Installed languages are kept as detected.
+    assert lang_for("Die Datei konnte nicht gespeichert werden.", "de") == "de"
