@@ -199,8 +199,12 @@ def test_store_ignores_paths_outside_the_package(tmp_path, fake_converter):
     assert not (tmp_path / "evil.txt").exists() and not (tmp_path / "evil2.txt").exists()
 
 
-def test_network_error_is_reported_as_network(tmp_path):
-    def opener(url, timeout=0):
+def test_network_error_is_reported_as_network(tmp_path, monkeypatch):
+    import keept.translate.models as models
+
+    monkeypatch.setattr(models.time, "sleep", lambda s: None)
+
+    def opener(url, timeout=0, offset=0):
         raise OSError("no route to host")
 
     with pytest.raises(ModelError) as err:
@@ -283,3 +287,39 @@ def test_sentences_are_nfc_normalised():
 
     decomposed = unicodedata.normalize("NFD", "Inténtalo más tarde.")
     assert split_sentences(decomposed) == ["Inténtalo más tarde."]
+
+
+def test_download_resumes_after_a_dropped_connection(tmp_path, fake_converter, monkeypatch):
+    import keept.translate.models as models
+
+    monkeypatch.setattr(models.time, "sleep", lambda s: None)
+    package = marian_package()
+    requests = []
+
+    class Dropping(FakeResponse):
+        """Sends half the file and then times out, like a slow server."""
+
+        def __init__(self, data, full):
+            super().__init__(data)
+            self.headers = {"Content-Length": str(len(full))}
+            self.status = 200
+
+        def read(self, n=-1):
+            chunk = super().read(n)
+            if not chunk:
+                raise TimeoutError("The read operation timed out")
+            return chunk
+
+    class Partial(FakeResponse):
+        status = 206
+
+    def opener(url, timeout=0, offset=0):
+        requests.append(offset)
+        if offset == 0:
+            return Dropping(package[: len(package) // 2], package)
+        return Partial(package[offset:])
+
+    store = ModelStore(tmp_path, opener=opener, catalog={("de", "en"): SPEC})
+    info = store.ensure("de", "en")
+    assert requests == [0, len(package) // 2]
+    assert (info.path / "model" / "model.bin").exists()

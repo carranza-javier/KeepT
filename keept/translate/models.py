@@ -70,9 +70,11 @@ class ModelStore:
         self._progress: dict[tuple[str, str], tuple[int, int]] = {}
 
     @staticmethod
-    def _urlopen(url: str, timeout: float = 20.0):
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        return urllib.request.urlopen(req, timeout=timeout)
+    def _urlopen(url: str, timeout: float = 20.0, offset: int = 0):
+        headers = {"User-Agent": USER_AGENT}
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+        return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout)
 
     def pair_dir(self, src: str, tgt: str) -> Path:
         return self.root / f"{src}_{tgt}"
@@ -148,31 +150,46 @@ class ModelStore:
         finally:
             tmp_zip.unlink(missing_ok=True)
 
-    def _fetch(self, url: str, dest: Path, progress: Progress | None) -> None:
-        try:
-            with self._open(url, 30.0) as resp, open(dest, "wb") as out:
-                total = int(resp.headers.get("Content-Length") or 0)
-                done = 0
-                last = 0.0
-                while True:
-                    chunk = resp.read(1 << 18)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    done += len(chunk)
-                    now = time.monotonic()
-                    if progress and (now - last > 0.1):
-                        progress(done, total)
-                        last = now
-                if progress:
-                    progress(done, total or done)
-                if total and done != total:
-                    raise ModelError("network", f"incomplete download ({done}/{total} bytes)")
-        except ModelError:
-            raise
-        except OSError as exc:
-            kind = "disk" if isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 28 else "network"
-            raise ModelError(kind, str(exc)) from exc
+    def _fetch(self, url: str, dest: Path, progress: Progress | None, attempts: int = 4) -> None:
+        """Download `url` to `dest`. The OPUS-MT servers are sometimes slow: when the connection
+        drops or times out, resume from the last byte (HTTP Range) instead of starting over."""
+        done = 0
+        total = 0
+        last = 0.0
+        error: Exception | None = None
+        with open(dest, "wb") as out:
+            for attempt in range(attempts):
+                try:
+                    resp = self._open(url, 30.0, done) if done else self._open(url, 30.0)
+                    with resp:
+                        length = int(resp.headers.get("Content-Length") or 0)
+                        if done and getattr(resp, "status", 206) != 206:
+                            out.seek(0)
+                            out.truncate()
+                            done = 0  # the server ignored the range: start again
+                        total = total or (done + length)
+                        while True:
+                            chunk = resp.read(1 << 18)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            done += len(chunk)
+                            now = time.monotonic()
+                            if progress and (now - last > 0.1):
+                                progress(done, total)
+                                last = now
+                    if total and done < total:
+                        raise OSError(f"connection closed at {done}/{total} bytes")
+                    if progress:
+                        progress(done, total or done)
+                    return
+                except OSError as exc:  # includes timeouts and dropped connections
+                    if isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 28:
+                        raise ModelError("disk", str(exc)) from exc
+                    error = exc
+                    log.warning("Download interrupted at %d bytes (attempt %d/%d): %s", done, attempt + 1, attempts, exc)
+                    time.sleep(min(5.0, 1.0 + attempt * 2))
+        raise ModelError("network", str(error))
 
     def _install(self, zip_path: Path, src: str, tgt: str, spec: dict) -> InstalledModel:
         """Extract an OPUS-MT Marian package and convert it to CTranslate2 int8."""
