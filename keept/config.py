@@ -28,6 +28,8 @@ class Config:
     # ~0.6 GB, translation gets ~20 % slower. RAM in Task Manager is the same either way.
     low_memory: bool = False
     ocr_warned: list = None  # languages whose missing OCR pack was already reported
+    check_updates: bool = True  # ask GitHub for a newer release, at most once a day
+    last_update_check: float = 0.0
 
     def __post_init__(self):
         if self.ocr_warned is None:

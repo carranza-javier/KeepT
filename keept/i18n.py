@@ -38,6 +38,11 @@ _STRINGS = {
         "en": "Couldn't download the language model. Check your internet connection.",
         "es": "No he podido descargar el modelo de idioma. Revisa la conexión a internet.",
     },
+    "err_integrity": {
+        "de": "Das heruntergeladene Sprachmodell ist beschädigt oder wurde verändert und wurde verworfen.",
+        "en": "The downloaded language model is damaged or was altered, so it was discarded.",
+        "es": "El modelo de idioma descargado está dañado o ha sido alterado y se ha descartado.",
+    },
     "err_disk": {
         "de": "Das Sprachmodell konnte nicht gespeichert werden. Ist die Festplatte voll?",
         "en": "Couldn't save the language model. Is the disk full?",
@@ -115,6 +120,15 @@ _STRINGS = {
         "es": "Ya lo usa otra aplicación. Prueba otra combinación.",
     },
     "hotkey_none_active": {"de": "kein Kürzel aktiv", "en": "no shortcut active", "es": "sin atajo activo"},
+    "tray_updates": {"de": "Nach Updates suchen", "en": "Check for updates", "es": "Buscar actualizaciones"},
+    "tray_update_item": {"de": "KeepT {version} herunterladen", "en": "Download KeepT {version}",
+                         "es": "Descargar KeepT {version}"},
+    "update_title": {"de": "Neue KeepT-Version", "en": "New KeepT version", "es": "Nueva versión de KeepT"},
+    "update_body": {
+        "de": "KeepT {version} ist verfügbar. Klicke hier, um die Downloadseite zu öffnen.",
+        "en": "KeepT {version} is available. Click here to open the download page.",
+        "es": "KeepT {version} está disponible. Haz clic aquí para abrir la página de descarga.",
+    },
     "tray_about": {"de": "Über KeepT", "en": "About KeepT", "es": "Acerca de KeepT"},
     "about_intro": {
         "de": "Übersetzt den Bildschirm direkt auf deinem PC. Keine Konten, keine Daten verlassen den Computer.",

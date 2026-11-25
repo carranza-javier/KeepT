@@ -85,6 +85,8 @@ class Tray:
         self.app = app
         self.icon = QSystemTrayIcon(app_icon())
         self.icon.activated.connect(self._on_activated)
+        self.icon.messageClicked.connect(self._on_message_clicked)
+        self._message_url = ""
         self.menu = QMenu()
         self.menu.aboutToShow.connect(self.rebuild)
         self.icon.setContextMenu(self.menu)
@@ -102,9 +104,18 @@ class Tray:
             text += f"\n{self._status}"
         self.icon.setToolTip(text)
 
-    def notify(self, title: str, body: str, warning: bool = False) -> None:
+    def notify(self, title: str, body: str, warning: bool = False, url: str = "") -> None:
+        """Tray notification; with `url`, clicking it opens that page in the browser."""
+        self._message_url = url
         icon = QSystemTrayIcon.Warning if warning else QSystemTrayIcon.Information
         self.icon.showMessage(title, body, icon, 8000)
+
+    def _on_message_clicked(self) -> None:
+        if self._message_url:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+
+            QDesktopServices.openUrl(QUrl(self._message_url))
 
     def _on_activated(self, reason) -> None:
         if reason == QSystemTrayIcon.Trigger:
@@ -114,6 +125,11 @@ class Tray:
         app, cfg = self.app, self.app.config
         m = self.menu
         m.clear()
+        release = getattr(app, "updates", None) and app.updates.available
+        if release:
+            up = m.addAction(i18n.tr("tray_update_item", version=release.version))
+            up.triggered.connect(lambda checked=False, u=release.page_url: self._open_url(u))
+            m.addSeparator()
         act = m.addAction(i18n.tr("tray_translate", hotkey=i18n.hotkey_label(cfg.hotkey)))
         act.triggered.connect(lambda: app.trigger())
         font = act.font()
@@ -167,6 +183,11 @@ class Tray:
         models_menu.addSeparator()
         models_menu.addAction(i18n.tr("tray_models_open")).triggered.connect(self._open_models)
 
+        upd = m.addAction(i18n.tr("tray_updates"))
+        upd.setCheckable(True)
+        upd.setChecked(cfg.check_updates)
+        upd.triggered.connect(lambda checked: app.set_check_updates(checked))
+
         m.addSeparator()
         m.addAction(i18n.tr("tray_about")).triggered.connect(self._about)
         m.addAction(i18n.tr("tray_quit")).triggered.connect(app.quit)
@@ -175,6 +196,12 @@ class Tray:
         dlg = HotkeyDialog(self.app.config.hotkey)
         if dlg.exec() == QDialog.Accepted and dlg.result_text:
             self.app.set_hotkey(dlg.result_text)
+
+    def _open_url(self, url: str) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        QDesktopServices.openUrl(QUrl(url))
 
     def _about(self) -> None:
         from .about import AboutDialog

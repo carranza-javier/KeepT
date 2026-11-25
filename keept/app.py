@@ -62,6 +62,10 @@ class KeepTApp:
         qapp.screenAdded.connect(self._add_overlay)
         qapp.screenRemoved.connect(self._remove_overlay)
 
+        from .updates import UpdateChecker
+
+        self.updates = UpdateChecker(self.config, self.config.save)
+        self.updates.update_available.connect(self._on_update_available)
         self.hotkey_ok = True
         self._hotkey_previous: str | None = None
         self.tray = Tray(self)
@@ -101,6 +105,7 @@ class KeepTApp:
             QTimer.singleShot(4000, self._cleanup_old_models)
             self._idle_timer.start()
         QTimer.singleShot(2500, self._check_ocr_languages)
+        QTimer.singleShot(6000, self.updates.check_if_due)  # at startup, at most once a day
         if args.open:
             QTimer.singleShot(300, self.trigger)
 
@@ -334,8 +339,19 @@ class KeepTApp:
         if self._open_overlay() is None:
             self.engine.release_models()
 
+    def _on_update_available(self, release) -> None:
+        self.tray.notify(i18n.tr("update_title"), i18n.tr("update_body", version=release.version),
+                         url=release.page_url)
+
+    def set_check_updates(self, enabled: bool) -> None:
+        self.config.check_updates = enabled
+        self.config.save()
+        if enabled:
+            self.updates.check_if_due()
+
     def _on_overlay_closed(self, ov) -> None:
         self._idle_timer.start()
+        self.updates.check_if_due()  # long running sessions: still at most once a day
         for other in self.overlays.values():
             other.hint_lang = ov.hint_lang
         if ov.hint_lang != self.config.last_source_lang:
