@@ -107,6 +107,17 @@ _STRINGS = {
         "en": "The shortcut {hotkey} is already used by another app. Pick another one from the menu.",
         "es": "El atajo {hotkey} ya lo usa otra aplicación. Elige otro desde el menú.",
     },
+    "hotkey_taken_kept": {
+        "de": "{new} wird bereits von einer anderen App verwendet. KeepT bleibt bei {old}.",
+        "en": "{new} is already used by another app. KeepT keeps using {old}.",
+        "es": "{new} ya lo usa otra aplicación. KeepT sigue usando {old}.",
+    },
+    "hotkey_taken_short": {
+        "de": "Wird bereits von einer anderen App verwendet. Probiere eine andere Kombination.",
+        "en": "Already used by another app. Try another combination.",
+        "es": "Ya lo usa otra aplicación. Prueba otra combinación.",
+    },
+    "hotkey_none_active": {"de": "kein Kürzel aktiv", "en": "no shortcut active", "es": "sin atajo activo"},
     "hotkey_dialog_title": {"de": "Tastenkürzel festlegen", "en": "Set shortcut", "es": "Elegir atajo"},
     "hotkey_dialog_body": {
         "de": "Drücke die neue Tastenkombination (mit Strg, Alt oder Umschalt). Esc zum Abbrechen.",

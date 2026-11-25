@@ -160,7 +160,7 @@ class WindowsServices:
         except AttributeError:  # pragma: no cover - very old Windows
             shcore.SetProcessDpiAwareness(2)
         try:  # own taskbar/tray identity instead of python.exe
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KeepT.KeepT")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KeepT")
         except Exception:  # pragma: no cover
             pass
 
@@ -179,6 +179,16 @@ class WindowsServices:
 
     def hotkey_backend(self) -> Win32HotkeyBackend:
         return Win32HotkeyBackend()
+
+    def hotkey_available(self, hotkey) -> bool:
+        """Try to register the combination for a moment: False if another app owns it."""
+        mods, vk = hotkey_to_win32(hotkey)
+        probe_id = HOTKEY_ID + 1
+        if user32.RegisterHotKey(None, probe_id, mods, vk):
+            user32.UnregisterHotKey(None, probe_id)
+            return True
+        log.info("Hotkey %s is taken (error %s)", hotkey, ctypes.get_last_error())
+        return False
 
     def system_language(self) -> str:
         langid = kernel32.GetUserDefaultUILanguage() & 0x3FF

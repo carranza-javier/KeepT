@@ -61,6 +61,8 @@ class KeepTApp:
         qapp.screenAdded.connect(self._add_overlay)
         qapp.screenRemoved.connect(self._remove_overlay)
 
+        self.hotkey_ok = True
+        self._hotkey_previous: str | None = None
         self.tray = Tray(self)
 
         # Free the models after 10 minutes without using KeepT (one single shot timer, armed
@@ -232,6 +234,19 @@ class KeepTApp:
             hk = Hotkey.parse(text)
         except ValueError:
             return
+        old = self.config.hotkey
+        if str(hk) == old and self.hotkey_ok:
+            return
+        # Check first, so a combination owned by another app never leaves KeepT without one.
+        if not services().hotkey_available(hk):
+            if self.hotkey_ok:
+                msg = i18n.tr("hotkey_taken_kept", new=i18n.hotkey_label(str(hk)), old=i18n.hotkey_label(old))
+            else:
+                msg = i18n.tr("hotkey_busy", hotkey=i18n.hotkey_label(str(hk)))
+            self.tray.notify("KeepT", msg, warning=True)
+            log.info("Hotkey %s refused: taken by another app", hk)
+            return
+        self._hotkey_previous = old
         self.config.hotkey = str(hk)
         self.config.save()
         self.hotkeys.set_hotkey(hk)
@@ -247,8 +262,22 @@ class KeepTApp:
         self.engine.translator.store.delete(src, tgt)
 
     def _on_hotkey_status(self, ok: bool, text: str) -> None:
-        if not ok:
+        from .hotkey import Hotkey
+
+        previous, self._hotkey_previous = self._hotkey_previous, None
+        if ok:
+            self.hotkey_ok = True
+        elif previous and previous != text:
+            # Lost a race with another app between the check and the registration: go back.
+            self.tray.notify("KeepT", i18n.tr("hotkey_taken_kept", new=i18n.hotkey_label(text),
+                                              old=i18n.hotkey_label(previous)), warning=True)
+            self.config.hotkey = previous
+            self.config.save()
+            self.hotkeys.set_hotkey(Hotkey.parse(previous))
+        else:
+            self.hotkey_ok = False
             self.tray.notify("KeepT", i18n.tr("hotkey_busy", hotkey=i18n.hotkey_label(text)), warning=True)
+        self.tray.update_tooltip()
 
     def _on_preload_status(self, pair: str, fraction: float) -> None:
         if fraction < 0:

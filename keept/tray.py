@@ -23,8 +23,9 @@ log = logging.getLogger(__name__)
 class HotkeyDialog(QDialog):
     """Captures a new key combination. Only used from the tray settings, never in the main flow."""
 
-    def __init__(self):
+    def __init__(self, current: str = ""):
         super().__init__(None, Qt.WindowStaysOnTopHint | Qt.Dialog)
+        self.current = current
         self.setWindowTitle(i18n.tr("hotkey_dialog_title"))
         self.setWindowIcon(app_icon())
         self.result_text: str | None = None
@@ -37,8 +38,12 @@ class HotkeyDialog(QDialog):
         f.setPointSize(16)
         f.setBold(True)
         self.preview.setFont(f)
+        self.error = QLabel("")
+        self.error.setWordWrap(True)
+        self.error.setStyleSheet("color: #c42b1c;")
         lay.addWidget(self.label)
         lay.addWidget(self.preview)
+        lay.addWidget(self.error)
         self.resize(380, 140)
 
     def keyPressEvent(self, e):
@@ -67,8 +72,11 @@ class HotkeyDialog(QDialog):
         if hk.conflicts_with_game_bar:
             self.preview.setText(str(hk) + "  ✕ (Game Bar)")
             return
+        self.preview.setText(i18n.hotkey_label(str(hk)))
+        if str(hk) != self.current and not services().hotkey_available(hk):
+            self.error.setText(i18n.tr("hotkey_taken_short"))
+            return
         self.result_text = str(hk)
-        self.preview.setText(self.result_text)
         self.accept()
 
 
@@ -88,7 +96,8 @@ class Tray:
     def update_tooltip(self, status: str | None = None) -> None:
         if status is not None:
             self._status = status
-        text = f"KeepT ({i18n.hotkey_label(self.app.config.hotkey)})"
+        active = i18n.hotkey_label(self.app.config.hotkey) if self.app.hotkey_ok else i18n.tr("hotkey_none_active")
+        text = f"KeepT ({active})"
         if self._status:
             text += f"\n{self._status}"
         self.icon.setToolTip(text)
@@ -160,7 +169,7 @@ class Tray:
         m.addAction(i18n.tr("tray_quit")).triggered.connect(app.quit)
 
     def _custom_hotkey(self) -> None:
-        dlg = HotkeyDialog()
+        dlg = HotkeyDialog(self.app.config.hotkey)
         if dlg.exec() == QDialog.Accepted and dlg.result_text:
             self.app.set_hotkey(dlg.result_text)
 
