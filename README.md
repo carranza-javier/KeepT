@@ -22,8 +22,13 @@ original, in the same place and with the same colours, like a lens.
 | `Ctrl+C` or "Copy" | Copy all visible translations |
 | Click outside the text | Close |
 
-The tray menu sets the target language (default: the Windows language), the
-shortcut, start with Windows and lets you delete downloaded models.
+The tray menu sets the target language (asked once on first run), the shortcut
+(default `Ctrl+Alt+T`; KeepT warns if another app already uses a combination),
+start with Windows, lets you delete downloaded models and shows the credits.
+
+Models are released after 10 minutes without using KeepT (about 80 MB of RAM in Task
+Manager instead of about 410 MB) and reloaded in the background as soon as the shortcut is
+pressed, while the screen is being read.
 
 Models are stored in `%LOCALAPPDATA%\KeepT\models`, settings in
 `%APPDATA%\KeepT\config.json` and the log in `%LOCALAPPDATA%\KeepT\keept.log`.
