@@ -51,6 +51,13 @@ def resource_path(*parts: str) -> Path:
     return base.joinpath("resources", *parts)
 
 
+def licenses_dir() -> Path:
+    """Full license texts of the bundled software (packaging/licenses in the source tree)."""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "licenses"
+    return Path(__file__).resolve().parents[1] / "packaging" / "licenses"
+
+
 def setup_logging(debug: bool = False) -> Path:
     log_dir = data_dir()
     log_dir.mkdir(parents=True, exist_ok=True)

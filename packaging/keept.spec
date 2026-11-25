@@ -15,6 +15,24 @@ hiddenimports = (
 )
 
 datas = collect_data_files("sacremoses") + collect_data_files("ctranslate2")
+# License texts: our collected copies plus the ones shipped by the bundled packages.
+datas += [(str(p), "licenses") for p in (ROOT / "packaging" / "licenses").glob("*.txt")]
+import glob  # noqa: E402
+
+for pattern, prefix in (("sacremoses-*.dist-info/licenses/LICENSE", "sacremoses"),
+                        ("subword_nmt-*.dist-info/LICENSE", "subword-nmt"),
+                        ("mss-*.dist-info/licenses/LICENSE.txt", "mss"),
+                        ("numpy-*.dist-info/licenses/LICENSE.txt", "numpy"),
+                        ("winrt_runtime-*.dist-info/licenses/LICENSE", "pywinrt"),
+                        ("pyyaml-*.dist-info/licenses/LICENSE", "pyyaml"),
+                        ("joblib-*.dist-info/licenses/LICENSE.txt", "joblib"),
+                        ("regex-*.dist-info/licenses/LICENSE.txt", "regex"),
+                        ("click-*.dist-info/licenses/LICENSE.txt", "click"),
+                        ("tqdm-*.dist-info/licenses/LICENCE", "tqdm")):
+    import sysconfig  # noqa: E402
+
+    for f in glob.glob(str(Path(sysconfig.get_paths()["purelib"]) / pattern)):
+        datas.append((f, f"licenses/{prefix}"))
 binaries = collect_dynamic_libs("ctranslate2")
 
 excludes = [
@@ -41,7 +59,8 @@ def keep(entry):
         return False
     # Software OpenGL fallback (unused: raster widgets only) and Qt's own OpenSSL copies
     # (the Qt TLS plugin is excluded; Python's ssl module ships libcrypto-3/libssl-3).
-    if name.rsplit("/", 1)[-1] in ("opengl32sw.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll"):
+    # cudnn64_9.dll: NVIDIA GPU library stub, unused (CPU only).
+    if name.rsplit("/", 1)[-1] in ("opengl32sw.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll", "cudnn64_9.dll"):
         return False
     for plugin in ("qml", "qmltooling", "networkinformation", "tls", "generic", "iconengines/qsvgicon",
                    "imageformats/qpdf", "imageformats/qsvg", "imageformats/qtiff", "imageformats/qwebp",

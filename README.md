@@ -78,14 +78,40 @@ keept/
   overlay/          overlay window, effects, pill, selection, rendering helpers
 ```
 
-## Translation models and licenses
+## Credits and licenses
 
-KeepT downloads its models on first use; none are bundled in the installer.
+KeepT downloads its translation models on first use; none are bundled in the installer.
+The same credits are shown in the tray menu under "About KeepT", and the full license
+texts ship in the program's `licenses` folder (`packaging/licenses` in the source tree).
 
-- German <-> Spanish: OPUS-MT Tatoeba transformer-big models (`deu-spa`, `spa-deu`) by the
-  Language Technology Research Group at the University of Helsinki, CC-BY 4.0
-  (Tiedemann and Thottingal, "OPUS-MT: Building open translation services for the World", EAMT 2020).
-  Downloaded from the official OPUS-MT storage and converted locally to CTranslate2 int8.
-- German <-> English and English <-> Spanish: Argos Translate packages (derived from OPUS-MT where stated).
+Translation models
+
+- **OPUS-MT Tatoeba transformer-big** (`deu-spa`, `spa-deu`), German and Spanish. Jörg Tiedemann,
+  Santhosh Thottingal et al., Language Technology Research Group, University of Helsinki:
+  "OPUS-MT: Building open translation services for the World", EAMT 2020.
+  License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+  Modified: downloaded from the official OPUS-MT storage and converted locally to CTranslate2 (int8).
+- **Argos Translate es-en 1.9**, derived from OPUS-MT (Tiedemann and Thottingal), packaged by
+  Argos Open Technologies. License: CC BY 4.0.
+- **Argos Translate de-en 1.3, en-de 1.3, en-es 1.0**, by Argos Open Technologies, trained on OPUS
+  corpora (OpenSubtitles, ParaCrawl, UNPC and others). The packages do not state a license; they
+  are downloaded from the Argos index, never redistributed by KeepT.
+
+Libraries bundled in the Windows build
+
+| Component | License |
+| --- | --- |
+| Qt 6 / PySide6 (dynamically linked, replaceable DLLs) | LGPL-3.0 |
+| CTranslate2 (SYSTRAN, OpenNMT) | MIT |
+| Intel oneMKL and OpenMP runtime, bundled with CTranslate2 | Intel Simplified Software License |
+| SentencePiece (Google) | Apache-2.0 |
+| sacremoses | MIT |
+| subword-nmt (Rico Sennrich) | MIT |
+| NumPy | BSD-3-Clause |
+| python-mss | MIT |
+| PyWinRT | MIT |
+| PyYAML, joblib, regex, click, tqdm | MIT, BSD-3-Clause, Apache-2.0, MPL-2.0 |
+| Python | PSF License |
+| PyInstaller bootloader | GPL-2.0 with bootloader exception |
 
 `tools/bench/benchmark_mt.py` compares candidate models on `tools/bench/sentences.json`.

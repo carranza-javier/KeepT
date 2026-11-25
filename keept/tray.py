@@ -166,12 +166,21 @@ class Tray:
         models_menu.addAction(i18n.tr("tray_models_open")).triggered.connect(self._open_models)
 
         m.addSeparator()
+        m.addAction(i18n.tr("tray_about")).triggered.connect(self._about)
         m.addAction(i18n.tr("tray_quit")).triggered.connect(app.quit)
 
     def _custom_hotkey(self) -> None:
         dlg = HotkeyDialog(self.app.config.hotkey)
         if dlg.exec() == QDialog.Accepted and dlg.result_text:
             self.app.set_hotkey(dlg.result_text)
+
+    def _about(self) -> None:
+        from .about import AboutDialog
+
+        self._about_dialog = AboutDialog()  # non modal, kept alive while open
+        self._about_dialog.show()
+        self._about_dialog.raise_()
+        self._about_dialog.activateWindow()
 
     def _open_models(self) -> None:
         path = self.app.engine.translator.store.root
