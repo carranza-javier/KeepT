@@ -126,8 +126,8 @@ def main():
         user32.GetCursorPos(ctypes.byref(pt))
         user32.WindowFromPoint.restype = wt.HWND
         hwnd = user32.GetAncestor(user32.WindowFromPoint(pt), 2)
-        if not _title(hwnd).startswith("KeepT"):
-            print("refused: window under cursor is not KeepT:", _title(hwnd))
+        if not (_title(hwnd).startswith("KeepT") or _title(hwnd) == "Test screen"):
+            print("refused: window under cursor is not KeepT or the test screen:", _title(hwnd))
             raise SystemExit(2)
         move_abs(x, y, MOUSEEVENTF_LEFTDOWN)
         time.sleep(0.05)
