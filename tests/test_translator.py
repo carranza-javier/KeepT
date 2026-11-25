@@ -391,3 +391,31 @@ def test_falls_back_to_official_storage_when_github_fails(tmp_path, fake_convert
     info = store.ensure("de", "en")
     assert calls[-1] == SPEC["url"] and any("github" in c for c in calls)
     assert (info.path / "model" / "model.bin").read_bytes() == b"ct2"  # converted locally
+
+
+def test_a_download_does_not_block_loading_another_pair():
+    import threading
+    import time as _time
+
+    from keept.translate.translator import Translator
+
+    release = threading.Event()
+
+    class SlowStore:
+        catalog = {}
+
+        def ensure(self, src, tgt, progress=None):
+            if (src, tgt) == ("en", "de"):
+                release.wait(5)  # a long download of a model that is not needed right now
+            return None
+
+    tr = Translator(store=SlowStore())
+    tr._default_loader = lambda s, t, p: (tr.store.ensure(s, t, p), object())[1]  # like the real one
+    bg = threading.Thread(target=tr.model, args=(("en", "de"),))
+    bg.start()
+    _time.sleep(0.1)
+    t0 = _time.perf_counter()
+    tr.model(("en", "es"))  # on disk: must load right away
+    assert _time.perf_counter() - t0 < 1.0
+    release.set()
+    bg.join()

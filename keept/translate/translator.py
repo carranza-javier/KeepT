@@ -97,6 +97,10 @@ class Translator:
         m = self._models.get(pair)
         if m is not None:
             return m
+        if self._loader is None:
+            # Download outside the load lock (the store has one lock per pair): a download of
+            # one pair must never keep another pair that is already on disk from loading.
+            self.store.ensure(pair[0], pair[1], progress)
         with self._load_lock:
             m = self._models.get(pair)
             if m is None:

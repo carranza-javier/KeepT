@@ -107,6 +107,16 @@ _STRINGS = {
         'nl': 'Taalmodel downloaden… {pct}%',
         'pl': 'Pobieranie modelu językowego… {pct}%',
     },
+    'downloading_lang': {
+        'de': '{lang} wird heruntergeladen, nur beim ersten Mal… {pct} %',
+        'en': 'Downloading {lang}, only the first time… {pct}%',
+        'es': 'Descargando {lang}, solo la primera vez… {pct} %',
+        'fr': 'Téléchargement de {lang}, seulement la première fois… {pct} %',
+        'it': 'Download di {lang}, solo la prima volta… {pct}%',
+        'pt': 'A transferir {lang}, só da primeira vez… {pct}%',
+        'nl': '{lang} downloaden, alleen de eerste keer… {pct}%',
+        'pl': 'Pobieranie: {lang}, tylko za pierwszym razem… {pct}%',
+    },
     'loading_model': {
         'de': 'Sprachmodell wird vorbereitet…',
         'en': 'Preparing language model…',

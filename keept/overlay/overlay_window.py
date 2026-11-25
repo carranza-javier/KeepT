@@ -607,8 +607,13 @@ class OverlayWindow(QWidget):
     def _on_progress(self, session: int, kind: str, fraction: float) -> None:
         if session != self.session or self.state == State.IDLE:
             return
-        if kind == "download":
-            self.pill.show_progress(i18n.tr("downloading", pct=int(fraction * 100)), fraction)
+        if kind.startswith("download"):
+            # Always say which language and that it happens only once: a first translation that
+            # waits for a download must not look like KeepT being slow.
+            src = kind.partition(":")[2]
+            text = (i18n.tr("downloading_lang", lang=i18n.lang_name(src), pct=int(fraction * 100)) if src
+                    else i18n.tr("downloading", pct=int(fraction * 100)))
+            self.pill.show_progress(text, fraction)
         else:
             self.pill.show_progress(i18n.tr("loading_model"), None)
 

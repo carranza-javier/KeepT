@@ -30,7 +30,7 @@ class Engine(QObject):
     ocr_finished = Signal(int, object)  # session, ScreenText
     ocr_failed = Signal(int, str)  # session, error kind
     ocr_refined = Signal(int, object)  # session, {block id: better lines}
-    progress = Signal(int, str, float)  # session, kind ("download" / "loading"), fraction (-1 unknown)
+    progress = Signal(int, str, float)  # session, kind ("download:<src>" / "loading"), fraction (-1 unknown)
     translated = Signal(int, int, str)  # session, block key, text
     translation_finished = Signal(int, float)  # session, seconds
     translation_failed = Signal(int, str, object)  # session, error kind, keys that failed
@@ -177,16 +177,16 @@ class Engine(QObject):
                             raise ModelError("network", "background download failed")
                         break
                     done, total = state
-                    self.progress.emit(session, "download", (n + (done / total if total else 0.0)) / len(pairs))
+                    self.progress.emit(session, f"download:{src}", (n + (done / total if total else 0.0)) / len(pairs))
                     time.sleep(0.25)
                 if not self._alive(session):
                     return
             if store.get(*pair) is None:
                 def progress(done: int, total: int, n=n) -> None:
                     frac = (done / total) if total else 0.0
-                    self.progress.emit(session, "download", (n + frac) / len(pairs))
+                    self.progress.emit(session, f"download:{src}", (n + frac) / len(pairs))
 
-                self.progress.emit(session, "download", n / len(pairs))
+                self.progress.emit(session, f"download:{src}", n / len(pairs))
                 tr.model(pair, progress)
             else:
                 # Models on disk load in about a second; the pending blocks already show the
