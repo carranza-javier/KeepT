@@ -1,7 +1,7 @@
 """Compare translation systems on real sentences (quality + latency).
 
 Systems:
-  argos     current KeepT models (de->es and es->de pivot through English)
+  keept     the current KeepT pipeline (catalog model, direct or through English)
   opus      OPUS-MT 2020 direct de-es / es-de (Marian, converted to CTranslate2 int8)
   opusbig   OPUS-MT Tatoeba transformer-big 2022 direct deu-spa / spa-deu (int8)
   nllb      NLLB-200 distilled 600M (CTranslate2 int8)
@@ -56,7 +56,7 @@ class NllbModel:
         return [self.sp.decode(r.hypotheses[0][1:]) for r in res]
 
 
-class ArgosPivot:
+class CurrentPipeline:
     def __init__(self, src: str, tgt: str):
         self.t = Translator()
         self.src, self.tgt = src, tgt
@@ -90,8 +90,8 @@ def chrf(hyp: str, ref: str, n: int = 6, beta: float = 2.0) -> float:
 def run(system: str, direction: str, items, models_dir: Path, translator_pair) -> dict:
     src, tgt = direction.split("-")
     t0 = time.perf_counter()
-    if system == "argos":
-        model = ArgosPivot(src, tgt)
+    if system == "keept":
+        model = CurrentPipeline(src, tgt)
         do = model.translate_texts
     else:
         if system == "nllb":
@@ -133,7 +133,7 @@ def main() -> int:
     out = Path(sys.argv[2])
     data = json.loads((Path(__file__).with_name("sentences.json")).read_text(encoding="utf-8"))
     pair_fn = Translator()._translate_pair
-    systems = sys.argv[3].split(",") if len(sys.argv) > 3 else ["argos", "opus", "opusbig", "nllb"]
+    systems = sys.argv[3].split(",") if len(sys.argv) > 3 else ["keept", "opus", "opusbig", "nllb"]
     results = []
     for direction, items in data.items():
         for system in systems:

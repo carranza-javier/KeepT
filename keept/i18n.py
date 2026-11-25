@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-LANG_NAMES = {
-    "de": {"de": "Deutsch", "en": "Englisch", "es": "Spanisch"},
-    "en": {"de": "German", "en": "English", "es": "Spanish"},
-    "es": {"de": "Alemán", "en": "Inglés", "es": "Español"},
-}
+# Languages the user interface itself is translated into (others fall back to English).
+UI_LANGS = ("de", "en", "es")
 
 _STRINGS = {
     "translate_screen": {"de": "Bildschirm übersetzen", "en": "Translate screen", "es": "Traducir pantalla"},
@@ -133,18 +130,19 @@ _STRINGS = {
         "en": "not stated in the package",
         "es": "no indicada en el paquete",
     },
-    "credit_role_de_es": {"de": "Deutsch und Spanisch", "en": "German and Spanish", "es": "alemán y español"},
-    "credit_role_es_en": {"de": "Spanisch nach Englisch", "en": "Spanish to English", "es": "español a inglés"},
-    "credit_role_argos": {"de": "Deutsch und Spanisch mit Englisch", "en": "German and Spanish with English",
-                          "es": "alemán y español con inglés"},
+    "credit_role_all_pairs": {"de": "alle Sprachpaare", "en": "all language pairs", "es": "todos los pares de idiomas"},
+    "credit_role_langid": {"de": "Spracherkennung", "en": "language detection", "es": "detección de idioma"},
     "credit_role_ui": {"de": "Oberfläche", "en": "user interface", "es": "interfaz"},
     "credit_role_engine": {"de": "Übersetzungsengine", "en": "translation engine", "es": "motor de traducción"},
     "credit_role_tokens": {"de": "Textzerlegung", "en": "tokenization", "es": "segmentación del texto"},
     "credit_role_misc": {"de": "Laufzeit", "en": "runtime", "es": "ejecución"},
     "credit_note_converted": {
-        "de": "Verändert: lokal in das CTranslate2-Format (int8) umgewandelt.",
-        "en": "Modified: converted locally to the CTranslate2 format (int8).",
-        "es": "Modificado: convertido en tu equipo al formato CTranslate2 (int8).",
+        "de": "Werden bei Bedarf von den offiziellen OPUS-MT-Servern geladen und verändert: lokal in das "
+        "CTranslate2-Format (int8) umgewandelt.",
+        "en": "Downloaded on demand from the official OPUS-MT storage and modified: converted locally to the "
+        "CTranslate2 format (int8).",
+        "es": "Se descargan cuando hacen falta desde los servidores oficiales de OPUS-MT y se modifican: se "
+        "convierten en tu equipo al formato CTranslate2 (int8).",
     },
     "credit_note_lgpl": {
         "de": "Dynamisch gelinkt; die Qt-Bibliotheken im Programmordner können ersetzt werden.",
@@ -167,6 +165,17 @@ _STRINGS = {
         "en": "Text recognition incomplete",
         "es": "Reconocimiento de texto incompleto",
     },
+    "ocr_missing_one": {
+        "de": "Für {lang} fehlt die Windows-Texterkennung, der Text wird ungenauer gelesen. Installiere sie unter "
+        "Einstellungen > Zeit und Sprache > Sprache ({lang} hinzufügen) oder in PowerShell als Administrator: "
+        "Add-WindowsCapability -Online -Name \"Language.OCR~~~{tag}~0.0.1.0\"",
+        "en": "Windows text recognition for {lang} is missing, so the text is read less accurately. Install it in "
+        "Settings > Time & language > Language (add {lang}) or in PowerShell as administrator: "
+        "Add-WindowsCapability -Online -Name \"Language.OCR~~~{tag}~0.0.1.0\"",
+        "es": "Falta el reconocimiento de texto de Windows para {lang}, así que el texto se lee con menos precisión. "
+        "Instálalo en Configuración > Hora e idioma > Idioma (agrega {lang}) o en PowerShell como administrador: "
+        "Add-WindowsCapability -Online -Name \"Language.OCR~~~{tag}~0.0.1.0\"",
+    },
     "ocr_missing_body": {
         "de": "Für {langs} fehlt die Windows-Texterkennung. Installiere sie unter Einstellungen > Zeit und Sprache > Sprache "
         "oder in PowerShell als Administrator: Add-WindowsCapability -Online -Name \"Language.OCR~~~{tag}~0.0.1.0\"",
@@ -182,7 +191,7 @@ _ui_lang = "en"
 
 def set_ui_lang(lang: str) -> None:
     global _ui_lang
-    _ui_lang = lang if lang in LANG_NAMES else "en"
+    _ui_lang = lang if lang in UI_LANGS else "en"
 
 
 def ui_lang() -> str:
@@ -208,4 +217,7 @@ def hotkey_label(text: str) -> str:
 
 
 def lang_name(code: str) -> str:
-    return LANG_NAMES[_ui_lang].get(code, code)
+    """Languages are always shown with their native name (Deutsch, Français, Polski...)."""
+    from .languages import native_name
+
+    return native_name(code)

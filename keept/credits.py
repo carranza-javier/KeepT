@@ -22,16 +22,11 @@ class Credit:
 
 
 MODELS = (
-    Credit("OPUS-MT Tatoeba transformer-big (deu-spa, spa-deu)", "credit_role_de_es",
+    Credit("OPUS-MT (Tatoeba-MT and OPUS-MT releases), every language pair", "credit_role_all_pairs",
            "Jörg Tiedemann, Santhosh Thottingal et al., Language Technology Research Group, University of Helsinki. "
-           "\"OPUS-MT: Building open translation services for the World\", EAMT 2020.",
-           CC_BY[0], "https://github.com/Helsinki-NLP/Tatoeba-Challenge", "credit_note_converted"),
-    Credit("Argos Translate es-en 1.9 (OPUS-MT)", "credit_role_es_en",
-           "Jörg Tiedemann, Santhosh Thottingal (OPUS-MT, University of Helsinki); packaged by Argos Open Technologies.",
-           CC_BY[0], "https://github.com/argosopentech/argos-translate", ""),
-    Credit("Argos Translate de-en 1.3, en-de 1.3, en-es 1.0", "credit_role_argos",
-           "Argos Open Technologies, trained on OPUS corpora (OpenSubtitles, ParaCrawl, UNPC and others).",
-           "", "https://github.com/argosopentech/argos-translate", ""),
+           "\"OPUS-MT: Building open translation services for the World\", EAMT 2020; "
+           "\"The Tatoeba Translation Challenge\", WMT 2020.",
+           CC_BY[0], "https://github.com/Helsinki-NLP/Opus-MT", "credit_note_converted"),
 )
 
 LIBRARIES = (
@@ -42,7 +37,9 @@ LIBRARIES = (
            "Intel Simplified Software License", "https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html"),
     Credit("SentencePiece", "credit_role_tokens", "Google", "Apache-2.0", "https://github.com/google/sentencepiece"),
     Credit("sacremoses", "credit_role_tokens", "Alvations and contributors", "MIT", "https://pypi.org/project/sacremoses/"),
-    Credit("subword-nmt", "credit_role_tokens", "Rico Sennrich", "MIT", "https://github.com/rsennrich/subword-nmt"),
+    Credit("py3langid (based on langid.py)", "credit_role_langid",
+           "Adrien Barbaresi; langid.py by Marco Lui and Timothy Baldwin", "BSD-3-Clause",
+           "https://github.com/adbar/py3langid"),
     Credit("NumPy", "credit_role_misc", "NumPy Developers", "BSD-3-Clause", "https://numpy.org"),
     Credit("python-mss", "credit_role_misc", "Mickaël Schoentgen", "MIT", "https://github.com/BoboTiG/python-mss"),
     Credit("PyWinRT", "credit_role_misc", "PyWinRT contributors", "MIT", "https://github.com/pywinrt/pywinrt"),

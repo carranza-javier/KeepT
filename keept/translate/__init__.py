@@ -1,1 +1,1 @@
-"""Offline translation (CTranslate2 + Argos models) and language detection."""
+"""Offline translation (CTranslate2 + OPUS-MT models) and language detection."""

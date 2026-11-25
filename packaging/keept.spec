@@ -10,17 +10,18 @@ ROOT = Path(SPECPATH).parent
 hiddenimports = (
     collect_submodules("winrt")
     + collect_submodules("keept")
-    + ["sacremoses", "subword_nmt.apply_bpe", "sentencepiece", "ctranslate2",
+    + ["sacremoses", "sentencepiece", "ctranslate2", "py3langid", "py3langid.langid",
        "ctranslate2.converters.opus_mt", "ctranslate2.converters.marian", "yaml"]
 )
 
-datas = collect_data_files("sacremoses") + collect_data_files("ctranslate2")
+datas = collect_data_files("sacremoses") + collect_data_files("ctranslate2") + collect_data_files("py3langid")
+datas += [(str(ROOT / "keept" / "translate" / "catalog.json"), "keept/translate")]
 # License texts: our collected copies plus the ones shipped by the bundled packages.
 datas += [(str(p), "licenses") for p in (ROOT / "packaging" / "licenses").glob("*.txt")]
 import glob  # noqa: E402
 
 for pattern, prefix in (("sacremoses-*.dist-info/licenses/LICENSE", "sacremoses"),
-                        ("subword_nmt-*.dist-info/LICENSE", "subword-nmt"),
+                        ("py3langid-*.dist-info/licenses/LICENSE", "py3langid"),
                         ("mss-*.dist-info/licenses/LICENSE.txt", "mss"),
                         ("numpy-*.dist-info/licenses/LICENSE.txt", "numpy"),
                         ("winrt_runtime-*.dist-info/licenses/LICENSE", "pywinrt"),

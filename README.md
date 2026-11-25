@@ -5,9 +5,9 @@ screen, reads the text locally and paints the translation right on top of the
 original, in the same place and with the same colours, like a lens.
 
 - **One click**: press `Ctrl+Alt+T`, then click a paragraph, circle some text, drag a rectangle, or press `Enter` for the whole screen.
-- **Local**: OCR uses the built in Windows engine and translation runs on your CPU (CTranslate2 with Argos Translate models). Screenshots never leave your PC. The only network access is downloading a language model the first time it is needed.
+- **Local**: OCR uses the built in Windows engine and translation runs on your CPU (CTranslate2 with OPUS-MT models). Screenshots never leave your PC. The only network access is downloading a language model the first time it is needed.
 - **Zero setup**: no accounts, no API keys. Lives in the system tray.
-- **Languages (v1)**: German, English and Spanish in any direction (German and Spanish pivot through English).
+- **Languages**: German, English, Spanish, French, Italian, Portuguese, Dutch and Polish, in any direction. Direct models where OPUS-MT has one, otherwise through English. No model ships with KeepT: each one is downloaded the first time it is needed (when you pick a target language or translate text in a new language).
 
 ## Using it
 
@@ -79,7 +79,7 @@ keept/
   platform/         Windows specifics (hotkey, DPI, DWM cloaking, autostart) behind an interface
   capture.py        monitor capture with mss
   ocr/              Windows.Media.Ocr wrapper, block grouping, per block language re-read
-  translate/        language detection, Argos model store, CTranslate2 translator with pivot
+  translate/        language detection, OPUS-MT catalog and model store, CTranslate2 translator with pivot
   overlay/          overlay window, effects, pill, selection, rendering helpers
 ```
 
@@ -91,16 +91,14 @@ texts ship in the program's `licenses` folder (`packaging/licenses` in the sourc
 
 Translation models
 
-- **OPUS-MT Tatoeba transformer-big** (`deu-spa`, `spa-deu`), German and Spanish. Jörg Tiedemann,
+- **OPUS-MT** (Tatoeba-MT and OPUS-MT releases) for every language pair: Jörg Tiedemann,
   Santhosh Thottingal et al., Language Technology Research Group, University of Helsinki:
-  "OPUS-MT: Building open translation services for the World", EAMT 2020.
+  "OPUS-MT: Building open translation services for the World", EAMT 2020, and
+  "The Tatoeba Translation Challenge", WMT 2020.
   License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-  Modified: downloaded from the official OPUS-MT storage and converted locally to CTranslate2 (int8).
-- **Argos Translate es-en 1.9**, derived from OPUS-MT (Tiedemann and Thottingal), packaged by
-  Argos Open Technologies. License: CC BY 4.0.
-- **Argos Translate de-en 1.3, en-de 1.3, en-es 1.0**, by Argos Open Technologies, trained on OPUS
-  corpora (OpenSubtitles, ParaCrawl, UNPC and others). The packages do not state a license; they
-  are downloaded from the Argos index, never redistributed by KeepT.
+  Modified: downloaded on demand from the official OPUS-MT storage and converted locally to
+  CTranslate2 (int8). The model used for each pair is listed in `keept/translate/catalog.json`
+  (built by `tools/build_model_catalog.py`).
 
 Libraries bundled in the Windows build
 
@@ -111,7 +109,7 @@ Libraries bundled in the Windows build
 | Intel oneMKL and OpenMP runtime, bundled with CTranslate2 | Intel Simplified Software License |
 | SentencePiece (Google) | Apache-2.0 |
 | sacremoses | MIT |
-| subword-nmt (Rico Sennrich) | MIT |
+| py3langid (Adrien Barbaresi, based on langid.py by Marco Lui and Timothy Baldwin) | BSD-3-Clause |
 | NumPy | BSD-3-Clause |
 | python-mss | MIT |
 | PyWinRT | MIT |
