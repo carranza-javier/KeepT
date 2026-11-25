@@ -112,15 +112,47 @@ def main() -> int:
     # Just outside the covered area nothing changed.
     c = img.pixelColor(int(target.right + 12), int(target.cy))
     assert c.red() > 240, c.name()
+    # Selection kind depends on the device only: mouse drag -> rectangle, touch drag -> lasso,
+    # and the outline is gone as soon as a translation shows up.
+    from PySide6.QtGui import QInputDevice, QPointingDevice
+
+    touch = QPointingDevice("test touchscreen", 77, QInputDevice.DeviceType.TouchScreen,
+                            QPointingDevice.PointerType.Finger, QInputDevice.Capability.Position, 1, 0)
+    seen = []
+    real_handle = ov.handle_gesture
+    ov.handle_gesture = lambda g: seen.append(g.kind)
+    diagonal = [QPointF(60 + i * 8, 60 + i * 4) for i in range(25)]
+    for device in (None, touch):
+        args = (device,) if device else ()
+        QApplication.sendEvent(ov, QMouseEvent(QEvent.MouseButtonPress, diagonal[0], ov.mapToGlobal(diagonal[0]),
+                                               Qt.LeftButton, Qt.LeftButton, Qt.NoModifier, *args))
+        for pt in diagonal[1:]:
+            QApplication.sendEvent(ov, QMouseEvent(QEvent.MouseMove, pt, ov.mapToGlobal(pt), Qt.NoButton,
+                                                   Qt.LeftButton, Qt.NoModifier, *args))
+        QApplication.sendEvent(ov, QMouseEvent(QEvent.MouseButtonRelease, diagonal[-1], ov.mapToGlobal(diagonal[-1]),
+                                               Qt.LeftButton, Qt.NoButton, Qt.NoModifier, *args))
+    assert seen == ["rect", "lasso"], seen
+    ov.handle_gesture = real_handle
+    assert ov.last_stroke_path is not None  # fading outline of the last lasso
+    ov.translate_blocks([Block([Line([Word("Hello again", Rect(400, 700, 120, 21))])], id=60, lang="en")])
+    ov._on_translated(ov.session, 60, "Hola de nuevo")
+    assert ov.last_stroke_path is None
+
     # A block in a language whose Windows OCR pack is missing is reported (once per request).
     from keept.ocr import backend as ocr_backend
 
     reported = []
     ov.ocr_pack_missing.connect(reported.append)
-    missing = next(c for c in ("pl", "nl", "it", "pt", "fr") if c not in ocr_backend().available_languages())
-    ov.translate_blocks([Block([Line([Word("Zapisz zmiany", Rect(700, 500, 120, 21))])], id=50, lang=missing)])
-    ov.translate_blocks([Block([Line([Word("Save changes", Rect(700, 560, 120, 21))])], id=51, lang="en")])
-    assert reported == [missing], reported
+    try:
+        available = ocr_backend().available_languages()
+    except Exception:  # noqa: BLE001 - machines without Windows OCR (some CI runners)
+        available = []
+    if available:  # nothing to compare against on a machine without any OCR pack
+        missing = next(c for c in ("pl", "nl", "it", "pt", "fr") if c not in available)
+        ov.translate_blocks([Block([Line([Word("Zapisz zmiany", Rect(700, 500, 120, 21))])], id=50, lang=missing)])
+        ov.translate_blocks([Block([Line([Word("Save changes", Rect(700, 560, 120, 21))])], id=51,
+                                   lang=available[0])])
+        assert reported == [missing], reported
     print("OK")
     return 0
 
