@@ -241,8 +241,16 @@ class WindowsServices:
             return False
 
     def prepare_overlay_window(self, win_id: int) -> None:
-        """No DWM open/close animations (they add a fade and delay)."""
+        """No DWM open/close animations (they add a fade and delay), and never in a screen
+        capture: KeepT must not read (and translate again) its own overlay, whatever the timing
+        of the next hotkey. KEEPT_CAPTURABLE=1 keeps it capturable for screenshots and demos."""
+        import os
+
         self._dwm_set(win_id, 3, 1)  # DWMWA_TRANSITIONS_FORCEDISABLED
+        if os.environ.get("KEEPT_CAPTURABLE") != "1":
+            WDA_EXCLUDEFROMCAPTURE = 0x11  # Windows 10 2004 and later
+            if not user32.SetWindowDisplayAffinity(wt.HWND(win_id), WDA_EXCLUDEFROMCAPTURE):
+                log.warning("Could not exclude the overlay from screen capture")
 
     def set_cloaked(self, win_id: int, cloaked: bool) -> None:
         """Hide/show a window instantly through DWM, without ShowWindow (which can stall)."""
