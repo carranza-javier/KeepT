@@ -80,3 +80,41 @@ def test_cover_rect_contains_text_rect():
     b = group_lines([make_line("hello world", 100, 100)])[0]
     c, r = b.cover_rect(), b.rect
     assert c.x < r.x and c.y < r.y and c.right > r.right and c.bottom > r.bottom
+
+
+def test_caps_label_is_not_part_of_the_next_paragraph():
+    # "FRANÇAIS" with a cedilla is as tall as the body text, but it is a label.
+    lines = [
+        make_line("FRANCAIS", 100, 100, h=15),
+        make_line("A partir du 1er décembre 2026, les ordures", 100, 120, h=15),
+        make_line("ménagères seront collectées le mardi.", 100, 138, h=15),
+    ]
+    assert texts(group_lines(lines)) == ["FRANCAIS", "A partir du 1er décembre 2026, les ordures ménagères seront collectées le mardi."]
+
+
+def test_wrapped_caps_lines_stay_together():
+    lines = [make_line("IMPORTANT NOTICE FOR ALL", 100, 100), make_line("RESIDENTS OF THE TOWN", 100, 126)]
+    assert len(group_lines(lines)) == 1
+
+
+def test_separators_split_items_that_never_join_lines_below():
+    lines = [
+        make_line("Freundliche Grüsse • Meilleures salutations • Cordiali saluti", 100, 100),
+        make_line("Gemeindeverwaltung Musterwil", 100, 124),
+    ]
+    assert texts(group_lines(lines)) == ["Freundliche Grüsse", "Meilleures salutations", "Cordiali saluti",
+                                        "Gemeindeverwaltung Musterwil"]
+
+
+def test_leading_bullet_is_a_list_marker():
+    lines = [make_line("• First item of the list that", 100, 100), make_line("wraps to a second line", 100, 126)]
+    assert texts(group_lines(lines)) == ["First item of the list that wraps to a second line"]
+
+
+def test_paragraph_break_after_a_sentence():
+    lines = [
+        make_line("Si prega di depositare i sacchi entro le ore 7.00.", 100, 100, h=15),
+        make_line("In caso di forti nevicate la raccolta slitta.", 100, 118, h=15),
+        make_line("Questions? The office is open Monday to Friday.", 100, 145, h=15),
+    ]
+    assert len(group_lines(lines)) == 2

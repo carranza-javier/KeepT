@@ -76,6 +76,9 @@ DESC_EM, ASC_EM, X_EM = 0.21, 0.74, 0.52
 @dataclass
 class Line:
     words: list[Word]
+    # Part of a line that was cut at a separator ("Grüsse • salutations • saluti"): such parts
+    # are separate items and never join the lines above or below.
+    inline: bool = False
 
     @property
     def rect(self) -> Rect:
@@ -106,6 +109,12 @@ class Line:
     def height(self) -> float:
         """Height of the line box (ascenders to descenders)."""
         return self.rect.h
+
+    @property
+    def is_caps(self) -> bool:
+        """An all capitals label ("FRANÇAIS", "ENGLISH")."""
+        letters = [c for c in self.text if c.isalpha()]
+        return len(letters) >= 3 and all(c.isupper() for c in letters)
 
 
 @dataclass
@@ -162,24 +171,50 @@ def join_lines(lines: list[str]) -> str:
     return out
 
 
+SEPARATORS = {"•", "·", "|", "◦", "‧", "∙", "●", "▪"}
+
+
 def split_line_on_gaps(line: Line, gap_factor: float = 1.8) -> list[Line]:
-    """Split an OCR line where a horizontal gap is much larger than the text height (columns, table cells)."""
-    if len(line.words) < 2:
-        return [line]
+    """Split an OCR line where a horizontal gap is much larger than the text height (columns,
+    table cells) and at separators ("Grüsse • salutations"; cleanup.mark_separators adds the
+    ones the OCR did not read)."""
     words = sorted(line.words, key=lambda w: w.rect.x)
+    if not words:
+        return []
     h = statistics.median(w.rect.h for w in words)
-    parts: list[list[Word]] = [[words[0]]]
-    for prev, cur in zip(words, words[1:]):
-        gap = cur.rect.x - prev.rect.right
-        if gap > gap_factor * h:
-            parts.append([cur])
-        else:
-            parts[-1].append(cur)
-    return [Line(p) for p in parts]
+    parts: list[list[Word]] = [[]]
+    inline = [False]
+
+    def cut(as_item: bool) -> None:
+        if as_item:
+            inline[-1] = True  # both sides of a separator are items
+        parts.append([])
+        inline.append(as_item)
+
+    for i, w in enumerate(words):
+        if w.text.strip() in SEPARATORS:
+            # Between words it separates items; at the start of a line it is a list bullet.
+            later = any(x.text.strip() not in SEPARATORS for x in words[i + 1:])
+            if parts[-1] and later:
+                cut(True)
+            continue
+        if parts[-1] and i > 0:
+            gap = w.rect.x - words[i - 1].rect.right
+            if gap > gap_factor * h:
+                cut(False)
+        parts[-1].append(w)
+    return [Line(p, inline=bool(f)) for p, f in zip(parts, inline) if p]
+
+
+_SENTENCE_END = re.compile(r"[.!?…:]\W*$")
 
 
 def _can_join(block: Block, line: Line) -> tuple[bool, float]:
     last = block.lines[-1]
+    if line.inline or last.inline:
+        return False, 0.0
+    if line.is_caps != last.is_caps:
+        return False, 0.0  # a label in capitals is never part of the paragraph next to it
     lr, br, cr = last.rect, block.rect, line.rect
     h_ref = max(last.height, 1.0)
     ratio = line.height / h_ref
@@ -188,6 +223,14 @@ def _can_join(block: Block, line: Line) -> tuple[bool, float]:
     h = max(last.height, line.height)
     vgap = cr.y - lr.bottom
     if vgap < -0.4 * h or vgap > 0.95 * h:
+        return False, 0.0
+    # Paragraph break: a clearly bigger gap than between the lines of the block so far, or, for
+    # a single line that ends a sentence, a gap of half a line.
+    if len(block.lines) >= 2:
+        inner = statistics.median(b.rect.y - a.rect.bottom for a, b in zip(block.lines, block.lines[1:]))
+        if vgap > inner + max(3.0, 0.35 * h):
+            return False, 0.0
+    elif _SENTENCE_END.search(last.text) and vgap > 0.5 * h:
         return False, 0.0
     overlap = min(br.right, cr.right) - max(br.x, cr.x)
     if overlap <= 0:
