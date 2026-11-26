@@ -86,42 +86,31 @@ def _line_touched(line: Line, points: tuple[Point, ...], pad: float) -> bool:
     return any(r.contains(x, y) for x, y in points)
 
 
-def _subset(block: Block, keep: list[bool]) -> Block | None:
-    if not any(keep):
-        return None
-    if all(keep):
-        return block
-    idx = [i for i, k in enumerate(keep) if k]
-    part = Block([block.lines[i] for i in idx], id=block.id * 1000 + idx[0] + 1, lang=block.lang)
-    part.meta["parent"] = block.id
-    return part
-
-
 def select_blocks(blocks: list[Block], gesture: Gesture) -> list[Block]:
-    """Blocks (or the selected lines of a block) covered by the gesture, in reading order."""
+    """Blocks touched by the gesture, in reading order. A block is always taken whole: covering
+    only some of its lines would leave the rest of the original showing under the translation,
+    and the whole paragraph gives the model better context."""
     if gesture.kind == "click":
         b = block_at(blocks, *gesture.points[0])
         return [b] if b else []
     chosen: list[Block] = []
     for block in blocks:
         if gesture.kind == "rect":
-            keep = [_line_in_rect(l, gesture.rect) for l in block.lines]
+            hit = any(_line_in_rect(l, gesture.rect) for l in block.lines)
         else:
-            keep = [_line_in_lasso(l, gesture.points) for l in block.lines]
-        part = _subset(block, keep)
-        if part:
-            chosen.append(part)
+            hit = any(_line_in_lasso(l, gesture.points) for l in block.lines)
+        if hit:
+            chosen.append(block)
     if not chosen:
         # An open stroke or a very flat rectangle (for example underlining a line) encloses
-        # nothing: use the lines it touches.
+        # nothing: use the blocks it touches.
         for block in blocks:
             pad = block.line_height * 0.3
             if gesture.kind == "lasso":
-                keep = [_line_touched(l, gesture.points, pad) for l in block.lines]
+                hit = any(_line_touched(l, gesture.points, pad) for l in block.lines)
             else:
                 grown = gesture.rect.adjusted(-pad, -pad, pad, pad)
-                keep = [l.rect.intersection_area(grown) > 0 for l in block.lines]
-            part = _subset(block, keep)
-            if part:
-                chosen.append(part)
+                hit = any(l.rect.intersection_area(grown) > 0 for l in block.lines)
+            if hit:
+                chosen.append(block)
     return chosen

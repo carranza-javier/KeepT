@@ -70,13 +70,19 @@ def test_rect_selects_whole_paragraph():
     assert [len(b.lines) for b in sel] == [3]
 
 
-def test_lasso_selects_only_circled_lines():
+def test_lasso_around_some_lines_selects_the_whole_block():
     blocks = screen_blocks()
     lasso = [(80, 112), (420, 112), (420, 160), (80, 160), (80, 113)]
     sel = select_blocks(blocks, classify(lasso, tool="touch"))
-    assert len(sel) == 1
-    assert sel[0].text == "First line of the paragraph second line of the paragraph"
-    assert sel[0].meta["parent"] == blocks[1].id
+    assert sel == [blocks[1]]  # all three lines: nothing of the original may show under it
+
+
+def test_rect_touching_one_line_selects_the_whole_block():
+    blocks = screen_blocks()
+    # A rectangle over the last line only.
+    sel = select_blocks(blocks, classify([(90, 168), (500, 195)], tool="mouse"))
+    assert sel == [blocks[1]]
+    assert len(sel[0].lines) == 3
 
 
 def test_lasso_around_everything():
