@@ -109,10 +109,12 @@ class Engine(QObject):
         self._ocr_pool.submit(run)
 
     # -- translation -----------------------------------------------------------------
-    def translate(self, session: int, jobs: list[TranslationJob], tgt: str) -> None:
-        self._tr_pool.submit(self._run_translate, session, jobs, tgt)
+    def translate(self, session: int, jobs: list[TranslationJob], tgt: str,
+                  names: frozenset[str] = frozenset()) -> None:
+        self._tr_pool.submit(self._run_translate, session, jobs, tgt, names)
 
-    def _run_translate(self, session: int, jobs: list[TranslationJob], tgt: str) -> None:
+    def _run_translate(self, session: int, jobs: list[TranslationJob], tgt: str,
+                       names: frozenset[str] = frozenset()) -> None:
         t0 = time.perf_counter()
         by_src: dict[str, list[TranslationJob]] = {}
         for job in jobs:
@@ -139,7 +141,7 @@ class Engine(QObject):
                 chunk = group[i:i + size]
                 tc = time.perf_counter()
                 try:
-                    results = self.translator.translate([j.text for j in chunk], src, tgt)
+                    results = self.translator.translate([j.text for j in chunk], src, tgt, names=names)
                 except Exception:  # noqa: BLE001
                     log.exception("Translation failed")
                     self.translation_failed.emit(session, "translate", [j.key for j in chunk])

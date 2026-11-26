@@ -28,6 +28,7 @@ from ..ocr.pipeline import ScreenText
 from ..platform import services
 from . import effects
 from .pill import SHADOW, LangMenu, Pill, ui_font
+from ..translate import protect
 from .render import FitResult, button_shape, fit_text, free_space_below, free_space_left, free_space_right, is_boxed, sample_background, sample_text_color, stroke_ratio, weight_class
 from .selection import Gesture, block_at, classify, select_blocks
 
@@ -508,14 +509,26 @@ class OverlayWindow(QWidget):
                     self.ocr_pack_missing.emit(lang)
         except Exception:  # noqa: BLE001 - only a hint for the user
             pass
-        self.pill.set_languages(langs.most_common(1)[0][0], tgt)
+        self.pill.set_languages(self._source_label(), tgt)
         self.pill.set_original_shown(False)
         self.show_original = False
         self.pill.set_mode("result")
         self.state = State.TRANSLATING
         jobs = [TranslationJob(it.key, it.block.text, it.block.lang or self.screen_lang or "en") for it in todo]
         self._t_request = time.perf_counter()
-        self.engine.translate(self.session, jobs, tgt)
+        # Names after a postal code anywhere on the screen ("3999 Musterwil") stay unchanged
+        # in every block.
+        names = protect.screen_names(b.text for b in self.blocks)
+        self.engine.translate(self.session, jobs, tgt, names)
+
+    def _source_label(self) -> str | None:
+        """Source language for the pill: the language of the translated blocks, or "auto" when
+        they are in several languages."""
+        langs = {it.block.lang or self.screen_lang or "en" for it in self.items.values()
+                 if it.status in ("pending", "done")}
+        if len(langs) > 1:
+            return "auto"
+        return next(iter(langs)) if langs else self.screen_lang
 
     def _fit(self, item: Item) -> FitResult:
         b = item.block
@@ -628,7 +641,7 @@ class OverlayWindow(QWidget):
         if blocks:
             self.translate_blocks(blocks)
         else:
-            self.pill.set_languages(self.screen_lang, code)
+            self.pill.set_languages(self._source_label(), code)
 
     # --------------------------------------------------------------- copying
     def _ordered_items(self) -> list[Item]:

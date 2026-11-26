@@ -795,7 +795,11 @@ def hotkey_label(text: str) -> str:
 
 
 def lang_name(code: str) -> str:
-    """Languages are always shown with their native name (Deutsch, Français, Polski...)."""
+    """Languages are always shown with their native name (Deutsch, Français, Polski...).
+    "auto" (blocks in several languages) is "Auto" in every interface language."""
     from .languages import native_name
+
+    if code == "auto":
+        return "Auto"
 
     return native_name(code)

@@ -43,7 +43,7 @@ class StubEngine(QObject):
     def start_ocr(self, *a):
         pass
 
-    def translate(self, session, jobs, tgt):
+    def translate(self, session, jobs, tgt, names=frozenset()):
         self.jobs.append((session, jobs, tgt))
 
 
