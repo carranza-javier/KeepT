@@ -164,3 +164,13 @@ def test_large_panel_is_not_a_button():
 
     img = canvas(800, 600, (11, 87, 208))
     assert button_shape(img, Rect(300, 290, 100, 16), (11, 87, 208), 16) is None
+
+
+def test_weight_classes_prefer_regular():
+    from keept.overlay.render import weight_class
+
+    # measured stroke ratios: Arial body text on screen 0.10-0.125, Segoe UI semibold 0.13-0.15,
+    # bold 0.15-0.23
+    assert [weight_class(r) for r in (0.099, 0.113, 0.118, 0.124)] == [0, 0, 0, 0]
+    assert [weight_class(r) for r in (0.138, 0.152)] == [1, 1]
+    assert [weight_class(r) for r in (0.174, 0.19)] == [2, 2]

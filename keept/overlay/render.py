@@ -257,11 +257,17 @@ def stroke_ratio(bgra: np.ndarray, rect: Rect, bg: RGB, fg: RGB, em: float) -> f
     return max(0.0, float(cover.sum()) / starts - 0.3) / em
 
 
+# Measured on rendered text (Arial, Segoe UI, Calibri, Times New Roman, Verdana at 12 to 28 px):
+# regular 0.09 to 0.12 (Arial body text on screen up to 0.125), semibold 0.13 to 0.15, bold 0.15
+# to 0.23. A doubt goes to regular: a translation in bold over regular text looks wrong.
+REGULAR_MAX, SEMIBOLD_MAX = 0.13, 0.165
+
+
 def weight_class(ratio: float) -> int:
     """0 = regular, 1 = semibold, 2 = bold."""
-    if ratio < 0.115:
+    if ratio < REGULAR_MAX:
         return 0
-    if ratio < 0.16:
+    if ratio < SEMIBOLD_MAX:
         return 1
     return 2
 
