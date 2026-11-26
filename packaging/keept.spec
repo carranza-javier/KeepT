@@ -18,6 +18,7 @@ hiddenimports = (
 datas = collect_data_files("sacremoses") + collect_data_files("ctranslate2") + collect_data_files("py3langid")
 datas += [(str(ROOT / "keept" / "translate" / "catalog.json"), "keept/translate")]
 datas += [(str(ROOT / "keept" / "translate" / "models_manifest.json"), "keept/translate")]
+datas += [(str(ROOT / "keept" / "translate" / "swiss_places.txt"), "keept/translate")]
 # License texts: our collected copies plus the ones shipped by the bundled packages.
 datas += [(str(p), "licenses") for p in (ROOT / "packaging" / "licenses").glob("*.txt")]
 import glob  # noqa: E402

@@ -10,6 +10,8 @@ import unicodedata
 import time
 from typing import Callable, Protocol
 
+from ..languages import language_name_label
+from . import protect, swiss
 from .models import KNOWN_PAIRS, LoadedModel, ModelStore, Progress
 
 log = logging.getLogger(__name__)
@@ -40,6 +42,25 @@ def split_sentences(text: str) -> list[str]:
         start = m.end()
     parts.append(text[start:])
     return [p for p in parts if p.strip()]
+
+
+_FR_A = re.compile(r"(?<!\S)[äåÄÅ](?!\S)")
+_IT_FINAL = re.compile(r"(?<=\w)[öäÖÄ](?=$|[\s.,;:!?)])")
+
+
+def fix_ocr_letters(text: str, lang: str) -> str:
+    """Letters the OCR confuses that cannot exist in the language: French "à" read as "ä" or
+    "å" ("Ä partir"), Italian final "ò"/"à" read as "ö"/"ä" ("puö", "cittä")."""
+    if lang == "fr":
+        return _FR_A.sub(lambda m: "À" if m.group(0).isupper() else "à", text)
+    if lang == "it":
+        def grave(m: re.Match) -> str:
+            c = {"ö": "ò", "ä": "à", "Ö": "Ò", "Ä": "À"}[m.group(0)]
+            before = text[m.start() - 1]
+            return c.lower() if before.islower() else c  # "puÖ" -> "può"
+
+        return _IT_FINAL.sub(grave, text)
+    return text
 
 
 def route(src: str, tgt: str, pairs=KNOWN_PAIRS) -> list[tuple[str, str]]:
@@ -129,32 +150,73 @@ class Translator:
         for pair in route(src, tgt):
             self.model(pair, progress)
 
-    def translate(self, texts: list[str], src: str, tgt: str, progress: Progress | None = None) -> list[str]:
-        """Translate whole texts (blocks). Each text is split in sentences and all sentences go in one batch."""
+    def translate(self, texts: list[str], src: str, tgt: str, progress: Progress | None = None,
+                  names: frozenset[str] = frozenset()) -> list[str]:
+        """Translate whole texts (blocks). Each text is split in sentences and all sentences go in
+        one batch. `names` are extra names to keep unchanged (see protect.screen_names)."""
         if src == tgt:
             return list(texts)
-        out: list[str | None] = [self._cache.get((t, src, tgt)) for t in texts]
+        out: list[str | None] = [self._cache.get((t, src, tgt, names)) for t in texts]
         todo = [i for i, v in enumerate(out) if v is None]
         if todo:
             t0 = time.perf_counter()
-            current = [texts[i] for i in todo]
-            for pair in route(src, tgt):
-                model = self.model(pair, progress)
-                current = self._translate_pair(model, current)
-            for i, result in zip(todo, current):
-                result = match_case(texts[i], unicodedata.normalize("NFC", result))
-                self._cache[(texts[i], src, tgt)] = result
+            spans: list[tuple[int, int]] = []
+            sentences: list[str] = []
+            for i in todo:
+                parts = split_sentences(fix_ocr_letters(texts[i], src))
+                spans.append((len(sentences), len(sentences) + len(parts)))
+                sentences.extend(parts)
+            done = self._translate_sentences(sentences, src, tgt, progress, names)
+            for i, (a, b) in zip(todo, spans):
+                result = match_case(texts[i], unicodedata.normalize("NFC", " ".join(done[a:b]).strip()))
+                self._cache[(texts[i], src, tgt, names)] = result
                 out[i] = result
             log.debug("Translated %d texts %s->%s in %.0f ms", len(todo), src, tgt, (time.perf_counter() - t0) * 1000)
         return [o or "" for o in out]
 
-    def _translate_pair(self, model: PairModel, texts: list[str]) -> list[str]:
-        flat: list[str] = []
-        spans: list[tuple[int, int]] = []
-        for text in texts:
-            sentences = split_sentences(text)
-            spans.append((len(flat), len(flat) + len(sentences)))
-            flat.extend(sentences)
-        with self._run_lock:
-            translated = model.translate(flat) if flat else []
-        return [" ".join(translated[a:b]).strip() for a, b in spans]
+    def _translate_sentences(self, sentences: list[str], src: str, tgt: str, progress: Progress | None,
+                             names: frozenset[str]) -> list[str]:
+        """Translate sentences keeping links, names and numbers exact. A sentence whose numbers
+        or names do not survive is translated again with markers for them; if it still fails,
+        it stays in the original language (a wrong date or amount is worse than none)."""
+        items = [protect.protect(s, src, names) for s in sentences]
+        rewrite = self._rewrite_for(src, tgt, progress)
+        results: list[str | None] = [language_name_label(s, src, tgt) for s in sentences]
+        level = [0] * len(items)
+        pending = [i for i, r in enumerate(results) if r is None]
+        while pending:
+            masked = [items[i].masked(level[i], rewrite) for i in pending]
+            translated = self._run_route(masked, src, tgt, progress)
+            retry = []
+            for i, text in zip(pending, translated):
+                item = items[i]
+                restored = item.restore(text)
+                if restored is not None and item.check(restored):
+                    results[i] = restored
+                elif level[i] < item.max_level():
+                    nxt = level[i] + 1
+                    if nxt == 1 and not item.has("name"):
+                        nxt = 2  # nothing to mask at level 1
+                    level[i] = nxt
+                    retry.append(i)
+                else:
+                    log.info("Kept a sentence untranslated: its numbers or names did not survive")
+                    results[i] = item.text
+            pending = retry
+        return [r or "" for r in results]
+
+    def _rewrite_for(self, src: str, tgt: str, progress: Progress | None):
+        if src != "de":
+            return lambda s: s
+        first = self.model(route(src, tgt)[0], progress)
+        tok = getattr(first, "tokenizer", None)
+        pieces = (lambda w: len(tok.encode(w))) if tok is not None else None
+        return lambda s: swiss.normalize(s, pieces)
+
+    def _run_route(self, texts: list[str], src: str, tgt: str, progress: Progress | None) -> list[str]:
+        current = texts
+        for pair in route(src, tgt):
+            model = self.model(pair, progress)
+            with self._run_lock:
+                current = model.translate(current) if current else []
+        return [c.strip() for c in current]

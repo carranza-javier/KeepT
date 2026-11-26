@@ -132,7 +132,15 @@ def main() -> int:
     models_dir = Path(sys.argv[1])
     out = Path(sys.argv[2])
     data = json.loads((Path(__file__).with_name("sentences.json")).read_text(encoding="utf-8"))
-    pair_fn = Translator()._translate_pair
+    def pair_fn(model, texts):
+        """One model, sentence split like KeepT (without KeepT's protections)."""
+        flat, spans = [], []
+        for text in texts:
+            parts = split_sentences(text)
+            spans.append((len(flat), len(flat) + len(parts)))
+            flat.extend(parts)
+        out = model.translate(flat) if flat else []
+        return [" ".join(out[a:b]).strip() for a, b in spans]
     systems = sys.argv[3].split(",") if len(sys.argv) > 3 else ["keept", "opus", "opusbig", "nllb"]
     results = []
     for direction, items in data.items():
