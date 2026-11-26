@@ -43,6 +43,8 @@ The app and the installer are also available in these eight languages. They foll
 
 No model ships inside the installer. Each one (about 80 to 250 MB) is downloaded once: during installation for the languages you choose, from the tray "Languages" window, or the first time you translate text in another language, with the progress shown in the pill. Models are kept in `%LOCALAPPDATA%\KeepT\models` and can be deleted from the tray. After 10 minutes without use KeepT frees them from memory, and it reloads them in the background as soon as you press the shortcut.
 
+E-mail addresses and links are never translated. Numbers, dates, times, amounts and Swiss place names (the official list of municipalities, and the word after a Swiss postal code such as "3999 Musterwil") come out exactly as they are on the screen: if the translation of a sentence changes one of them, the sentence is translated again with these parts protected, and if that still fails it stays in the original language rather than show a wrong date or amount. German written in Switzerland ("Strasse", "Grüsse", "Kehricht", "Velo", "parkieren") is rewritten to the spelling and words the models know before it is translated.
+
 Text recognition uses the OCR built into Windows. If the OCR pack for a language is missing, KeepT tells you how to add it (Settings > Time & language > Language).
 
 ## Privacy
@@ -83,6 +85,8 @@ These tools work without touching the real mouse or keyboard:
 - `tools/make_test_screen.py` renders a synthetic screen with known German, English and Spanish text.
 - `tools/drive_overlay.py IMAGE` drives the real overlay with synthetic input and saves frames.
 - `tools/ocr_dump.py IMAGE` prints the text blocks and languages KeepT detects.
+- `tools/render_letter.py OUT.png [ZOOM]` renders the multilingual sample letter in `docs/` (used by `tests/test_letter.py`), and `tools/bench/swiss_german.py` measures the Swiss German rewriting.
+- KeepT's own windows are excluded from screen capture, so it can never read its own overlay. Set `KEEPT_CAPTURABLE=1` to take screenshots of them with other tools.
 - `python -m keept --selftest IMAGE|screen --target es` runs OCR and translation once and reports timings; it also works with the packaged `KeepT.exe`.
 - `python -m keept --fake-capture IMAGE --debug-blocks` uses an image instead of the screen and outlines the OCR blocks.
 - `tools/record_demo.py` and `tools/make_gif.py` record the README animation from the synthetic screen.
@@ -121,6 +125,10 @@ KeepT downloads its translation models on first use, and none are bundled in the
 ### Translation models
 
 **OPUS-MT** (Tatoeba-MT and OPUS-MT releases) is used for every language pair. It was created by Jörg Tiedemann, Santhosh Thottingal et al. at the Language Technology Research Group, University of Helsinki, and is described in "OPUS-MT: Building open translation services for the World" (EAMT 2020) and "The Tatoeba Translation Challenge" (WMT 2020). License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The models were modified: they are converted to CTranslate2 (int8) and published in the [models-v1 release](https://github.com/carranza-javier/KeepT/releases/tag/models-v1) together with the original LICENSE and README and a NOTICE describing the conversion. The model used for each pair is listed in `keept/translate/catalog.json` (built by `tools/build_model_catalog.py`).
+
+### Data
+
+The names of Swiss municipalities that KeepT keeps unchanged (`keept/translate/swiss_places.txt`, built by `tools/build_swiss_places.py`) come from the [Official commune register of Switzerland](https://www.agvchapp.bfs.admin.ch) of the Swiss Federal Statistical Office (BFS/OFS), open data that may be used freely with the source named.
 
 ### Libraries bundled in the Windows build
 
