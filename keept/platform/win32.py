@@ -241,16 +241,25 @@ class WindowsServices:
             return False
 
     def prepare_overlay_window(self, win_id: int) -> None:
-        """No DWM open/close animations (they add a fade and delay), and never in a screen
-        capture: KeepT must not read (and translate again) its own overlay, whatever the timing
-        of the next hotkey. KEEPT_CAPTURABLE=1 keeps it capturable for screenshots and demos."""
-        import os
-
+        """No DWM open/close animations (they add a fade and delay)."""
         self._dwm_set(win_id, 3, 1)  # DWMWA_TRANSITIONS_FORCEDISABLED
-        if os.environ.get("KEEPT_CAPTURABLE") != "1":
-            WDA_EXCLUDEFROMCAPTURE = 0x11  # Windows 10 2004 and later
-            if not user32.SetWindowDisplayAffinity(wt.HWND(win_id), WDA_EXCLUDEFROMCAPTURE):
-                log.warning("Could not exclude the overlay from screen capture")
+        self.set_capture_excluded(win_id, True)
+
+    def set_capture_excluded(self, win_id: int, excluded: bool) -> None:
+        """Keep a window out of every screen capture, or let captures see it again. The overlay
+        is excluded only while it is closed: a hotkey right after closing it must never capture
+        a frame that DWM has not yet updated, while screenshots of an open overlay (Win+Shift+S)
+        must show the translation."""
+        WDA_NONE, WDA_EXCLUDEFROMCAPTURE = 0x0, 0x11  # Windows 10 2004 and later
+        if not user32.SetWindowDisplayAffinity(wt.HWND(win_id), WDA_EXCLUDEFROMCAPTURE if excluded else WDA_NONE):
+            log.debug("SetWindowDisplayAffinity(%s) failed", excluded)
+
+    def wait_for_composition(self) -> None:
+        """Block until DWM has composed the next frame (so a window just hidden is gone)."""
+        try:
+            ctypes.windll.dwmapi.DwmFlush()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("DwmFlush failed: %s", exc)
 
     def set_cloaked(self, win_id: int, cloaked: bool) -> None:
         """Hide/show a window instantly through DWM, without ShowWindow (which can stall)."""
