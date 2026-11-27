@@ -122,9 +122,14 @@ _failed = False
 _lock = threading.Lock()
 
 
-def recognizer() -> LineRecognizer | None:
-    """The shared recognizer, or None if it cannot run (then Windows OCR text is used)."""
-    global _rec, _failed
+_single: LineRecognizer | None = None
+
+
+def recognizer(single_thread: bool = False) -> LineRecognizer | None:
+    """The shared recognizer, or None if it cannot run (then Windows OCR text is used).
+    `single_thread`: a second session with one thread, for the threads that read several
+    lines at once (four sessions of four threads each overload a laptop CPU)."""
+    global _rec, _single, _failed
     with _lock:
         if _rec is None and not _failed:
             try:
@@ -132,4 +137,11 @@ def recognizer() -> LineRecognizer | None:
             except Exception as exc:  # noqa: BLE001 - fall back to the Windows OCR text
                 log.warning("Line recognizer unavailable, using Windows OCR text: %s", exc)
                 _failed = True
+        if single_thread and _rec is not None:
+            if _single is None:
+                try:
+                    _single = LineRecognizer(threads=1)
+                except Exception:  # noqa: BLE001 - share the main one
+                    _single = _rec
+            return _single
         return _rec

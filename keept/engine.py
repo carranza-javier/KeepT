@@ -157,9 +157,10 @@ class Engine(QObject):
                 return None
 
         def work(helper: bool = False) -> None:
+            reader = recognizer(single_thread=True) if helper else rec
             while (nxt := take(helper)) is not None:
                 try:
-                    reread_block(by_id[nxt], bgra, rec)
+                    reread_block(by_id[nxt], bgra, reader)
                 except Exception:  # noqa: BLE001 - keep the Windows OCR reading of this block
                     log.exception("Second reading of block %d failed", nxt)
                     by_id[nxt].meta["confidence"] = 1.0
@@ -198,9 +199,10 @@ class Engine(QObject):
                 from .ocr.layout import Rect
                 from .ocr.recognizer import recognizer
 
-                rec = recognizer()
-                if rec is not None:
-                    rec.read(np.full((24, 120, 4), 255, np.uint8), [Rect(4, 4, 100, 16)])
+                for single in (False, True):
+                    rec = recognizer(single_thread=single)
+                    if rec is not None:
+                        rec.read(np.full((24, 120, 4), 255, np.uint8), [Rect(4, 4, 100, 16)])
             except Exception as exc:  # noqa: BLE001
                 log.warning("Line recognizer warm up failed: %s", exc)
             try:

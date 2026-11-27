@@ -42,10 +42,8 @@ STROKE_FADE_MS = 220.0  # fade of the selection outline after release
 MIN_TEXT_PX = 10.0  # logical, smallest legible translated text
 FADE_MS = 220.0
 # Translating several blocks: each appears once every block above it is ready, in a wave that
-# runs down the screen at this speed, each block uncovered top to bottom in REVEAL_MS.
-REVEAL_MS = 340.0
-WAVE_PX_PER_MS = 2.2  # logical px
-WAVE_MAX_DELAY_MS = 450.0
+# uncovers them top to bottom in REVEAL_MS; blocks that become visible together share one sweep.
+REVEAL_MS = 150.0
 
 
 _UNTRANSLATABLE = re.compile(
@@ -182,6 +180,7 @@ class OverlayWindow(QWidget):
         self.pending_action: tuple | None = None
         self.items: dict[int, Item] = {}
         self.read_ids: set[int] = set()  # blocks whose second OCR reading is done
+        self._asked_all = False  # "Translate screen" asked in this session
         self.waiting: set[int] = set()  # items (shimmering) waiting for that reading
         self._dispatch_queued = False
         self._hovered = -1
@@ -223,6 +222,7 @@ class OverlayWindow(QWidget):
     def open(self, capture: Capture, t_hotkey: float) -> None:
         OverlayWindow._session_counter += 1
         self.session = OverlayWindow._session_counter
+        self._asked_all = False
         self.engine.set_active(self.session)
         self._reset_session_state()
         self._t_hotkey = t_hotkey
@@ -390,8 +390,8 @@ class OverlayWindow(QWidget):
         """Translate the blocks just read in the background (nobody asked for them yet), so
         "Translate screen" finds them done. Only languages whose models are on disk."""
         translator = getattr(self.engine, "translator", None)
-        if translator is None or not hasattr(self.engine, "speculate"):
-            return
+        if translator is None or not hasattr(self.engine, "speculate") or self._asked_all:
+            return  # with the whole screen asked for, everything goes to the foreground
         tgt = self.target
         by_id = {b.id: b for b in self.blocks}
         asked = {it.block.id for it in self.items.values()}
@@ -440,6 +440,7 @@ class OverlayWindow(QWidget):
         if not self.blocks:
             self.pill.show_message(i18n.tr("no_text"), 2000)
             return
+        self._asked_all = True
         self.translate_blocks(self.blocks)
 
     def handle_gesture(self, gesture: Gesture) -> None:
@@ -706,22 +707,18 @@ class OverlayWindow(QWidget):
         if not ready:
             return
         blockers = [it.block.rect.y for it in wave if not it.meta.get("ready")]
+        batch = [it for it in ready
+                 if not any(by < it.block.rect.y - it.block.line_height * 0.5 for by in blockers)]
+        if not batch:
+            return
+        # One sweep over all of them, from the top of the first to the bottom of the last.
+        areas = [self.to_logical(it.block.cover_rect()).united(self.to_logical(self._item_rect(it))) for it in batch]
+        sweep = (min(a.top() for a in areas), max(a.bottom() for a in areas))
         now = self.now()
-        latest = max((it.t_done for it in self.items.values() if it.status == "done" and it.meta.get("wave")),
-                     default=now)
-        y0 = None
-        shown = False
-        for it in sorted(ready, key=lambda i: (i.block.rect.y, i.block.rect.x)):
-            y = it.block.rect.y
-            if any(by < y - it.block.line_height * 0.5 for by in blockers):
-                continue
-            y0 = y if y0 is None else y0
-            delay = min(WAVE_MAX_DELAY_MS, (y - y0) / self.scale / WAVE_PX_PER_MS)
-            # Never before a block above that is still being uncovered.
-            self._show(it, max(now + delay, min(latest, now + WAVE_MAX_DELAY_MS)))
-            shown = True
-        if shown:
-            self._on_translation_finished(self.session, 0.0)
+        for it in batch:
+            it.meta["sweep"] = sweep
+            self._show(it, now)
+        self._on_translation_finished(self.session, 0.0)
 
     def _show(self, item: Item, t_done: float) -> None:
         if item.status != "done":
@@ -1010,8 +1007,9 @@ class OverlayWindow(QWidget):
         the translation above the band, the waiting shimmer still below it."""
         e = effects.ease_in_out((t - it.t_done) / REVEAL_MS)
         area = self.to_logical(it.block.cover_rect()).united(cover)
+        top, bottom = it.meta.get("sweep", (area.top(), area.bottom()))
         band = max(6.0, min(22.0, area.height() * 0.4))
-        front = area.top() - band / 2 + (area.height() + band) * e
+        front = top - band / 2 + (bottom - top + band) * e
         if phase != "text":
             p.save()
             p.setClipRect(QRectF(area.left() - 2, front, area.width() + 4, max(0.0, area.bottom() - front + 2)))
