@@ -99,7 +99,9 @@ class Translator:
         # different models (German and French blocks of one page) run in parallel.
         self._run_locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_lock = threading.Lock()
+        self._inflight: dict[tuple, threading.Event] = {}  # sentences being translated now
         self._cache: dict[tuple[str, str, str], str] = {}
+        self._scache: dict[tuple, str] = {}  # (sentence, src, tgt, names in it) -> translation
 
     def _default_loader(self, src: str, tgt: str, progress: Progress | None) -> PairModel:
         info = self.store.ensure(src, tgt, progress)
@@ -134,6 +136,12 @@ class Translator:
         with self._load_lock:
             self._models.pop((src, tgt), None)
         self._cache.clear()
+        self._scache.clear()
+
+    def clear_cache(self) -> None:
+        """Forget every translation (tools and benchmarks)."""
+        self._cache.clear()
+        self._scache.clear()
 
     def unload_all(self) -> int:
         """Drop every loaded model (memory is returned when the CTranslate2 objects go away).
@@ -167,13 +175,58 @@ class Translator:
                 parts = split_sentences(texts[i])
                 spans.append((len(sentences), len(sentences) + len(parts)))
                 sentences.extend(parts)
-            done = self._translate_sentences(sentences, src, tgt, progress, names)
+            done = self._cached_sentences(sentences, src, tgt, progress, names)
             for i, (a, b) in zip(todo, spans):
                 result = match_case(texts[i], unicodedata.normalize("NFC", " ".join(done[a:b]).strip()))
                 self._cache[(texts[i], src, tgt, names)] = result
                 out[i] = result
             log.debug("Translated %d texts %s->%s in %.0f ms", len(todo), src, tgt, (time.perf_counter() - t0) * 1000)
         return [o or "" for o in out]
+
+    def sentences_cached(self, text: str, src: str, tgt: str, names: frozenset[str] = frozenset()) -> bool:
+        return all(self._skey(s, src, tgt, names) in self._scache for s in split_sentences(text))
+
+    @staticmethod
+    def _skey(sentence: str, src: str, tgt: str, names: frozenset[str]):
+        # Only the names in the sentence matter: a name found later elsewhere on the screen
+        # does not make the sentences translated before it stale.
+        return sentence, src, tgt, frozenset(n for n in names if n in sentence)
+
+    def _cached_sentences(self, sentences: list[str], src: str, tgt: str, progress: Progress | None,
+                          names: frozenset[str]) -> list[str]:
+        """Translations of sentences, from the sentence cache when a previous call (often the
+        translation in the background, one sentence at a time) already did them."""
+        keys = [self._skey(s, src, tgt, names) for s in sentences]
+        mine: list[int] = []
+        theirs: list[threading.Event] = []
+        with self._locks_lock:
+            for i, k in enumerate(keys):
+                if k in self._scache:
+                    continue
+                if k in self._inflight:
+                    # Another thread (the background) is translating it right now: wait for it
+                    # instead of doing the same work twice on a busy CPU.
+                    theirs.append(self._inflight[k])
+                elif all(keys[j] != k for j in mine):
+                    self._inflight[k] = threading.Event()
+                    mine.append(i)
+        try:
+            if mine:
+                done = self._translate_sentences([sentences[i] for i in mine], src, tgt, progress, names)
+                for i, text in zip(mine, done):
+                    self._scache[keys[i]] = text
+        finally:
+            with self._locks_lock:
+                for i in mine:
+                    self._inflight.pop(keys[i]).set()
+        for ev in theirs:
+            ev.wait()
+        missing = [i for i, k in enumerate(keys) if k not in self._scache]
+        if missing:  # the other thread failed: translate them here
+            done = self._translate_sentences([sentences[i] for i in missing], src, tgt, progress, names)
+            for i, text in zip(missing, done):
+                self._scache[keys[i]] = text
+        return [self._scache[k] for k in keys]
 
     def _translate_sentences(self, sentences: list[str], src: str, tgt: str, progress: Progress | None,
                              names: frozenset[str]) -> list[str]:

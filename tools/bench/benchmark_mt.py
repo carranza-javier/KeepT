@@ -63,7 +63,7 @@ class CurrentPipeline:
         self.t.prepare(src, tgt)
 
     def translate_texts(self, texts):
-        self.t._cache.clear()
+        self.t.clear_cache()
         return self.t.translate(texts, self.src, self.tgt)
 
 

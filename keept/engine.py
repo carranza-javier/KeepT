@@ -56,6 +56,13 @@ class Engine(QObject):
         self._queues: dict[str, deque] = {}  # source language -> (session, tgt, names, job)
         self._draining: set[str] = set()  # languages whose thread is working on its queue
         self._first_done = -1  # last session that already has a translated block
+        # Translation in the background (see speculate): one thread, one sentence at a time.
+        self._bg: deque = deque()  # (session, tgt, names, job)
+        self._bg_running = False
+        self._bg_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-background")
+        self._urgent_reading = 0  # blocks the user asked for being read right now
+        self._taken: set[int] = set()  # blocks of the current session read or being read
+        self._reading = False  # second reading of a screen in progress
         # Downloads get their own thread so a long model download never blocks translating
         # with the models that are already there.
         self._dl_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-download")
@@ -97,6 +104,7 @@ class Engine(QObject):
             return
         with self._reread_cond:
             self._urgent = []
+            self._taken = set()
         self.ocr_finished.emit(session, result)
         self._reread(session, result.blocks, bgra)
 
@@ -104,6 +112,8 @@ class Engine(QObject):
         """Read these blocks again before the others (the user wants them translated)."""
         with self._reread_cond:
             if self._alive(session):
+                # Blocks already read (or being read) are not waited for.
+                block_ids = [i for i in block_ids if i not in self._taken]
                 self._urgent = [*block_ids, *(i for i in self._urgent if i not in block_ids)]
                 self._reread_cond.notify_all()
 
@@ -119,6 +129,9 @@ class Engine(QObject):
         by_id = {b.id: b for b in blocks}
         rest = [b.id for b in blocks]
         taken: set[int] = set()
+        with self._reread_cond:
+            self._taken = taken
+        asked: set[int] = set()
         done: list[int] = []
 
         def take(helper: bool) -> int | None:
@@ -130,6 +143,8 @@ class Engine(QObject):
                     # several: one block (a click) is read faster alone than next to another.
                     if urgent and (not helper or len(urgent) >= 2):
                         taken.add(urgent[0])
+                        asked.add(urgent[0])
+                        self._urgent_reading += 1
                         return urgent[0]
                     if helper or self._translating:
                         # Blocks nobody asked for yet wait while a translation runs: both need
@@ -149,13 +164,24 @@ class Engine(QObject):
                     log.exception("Second reading of block %d failed", nxt)
                     by_id[nxt].meta["confidence"] = 1.0
                 done.append(nxt)
+                if nxt in asked:
+                    with self._reread_cond:
+                        self._urgent_reading -= 1
+                        self._reread_cond.notify_all()
                 if self._alive(session):
                     self.blocks_read.emit(session, [nxt])
 
-        helpers = [self._reread_pool.submit(work, True) for _ in range(REREAD_HELPERS)]
-        work()
-        for f in helpers:
-            f.result()
+        with self._reread_cond:
+            self._reading = True
+        try:
+            helpers = [self._reread_pool.submit(work, True) for _ in range(REREAD_HELPERS)]
+            work()
+            for f in helpers:
+                f.result()
+        finally:
+            with self._reread_cond:
+                self._reading = False
+                self._reread_cond.notify_all()
         log.info("Second reading of %d/%d block(s) in %.0f ms", len(done), len(by_id), (time.perf_counter() - t0) * 1000)
 
     def warm_up(self, lang: str) -> None:
@@ -193,6 +219,10 @@ class Engine(QObject):
         """Queue blocks for translation. Each source language has its own queue and thread."""
         start: list[str] = []
         with self._reread_cond:
+            # Blocks asked for leave the background queue: the foreground does them now.
+            keys = {(session, j.key) for j in jobs}
+            if self._bg:
+                self._bg = deque(e for e in self._bg if (e[0], e[3].key) not in keys)
             for job in jobs:
                 queue = self._queues.setdefault(job.src, deque())
                 queue.append((session, tgt, names, job))
@@ -205,6 +235,68 @@ class Engine(QObject):
                 if pool is None:
                     pool = self._lang_pools[src] = ThreadPoolExecutor(1, thread_name_prefix=f"keept-translate-{src}")
                 pool.submit(self._drain, src)
+
+    # -- translation in the background ---------------------------------------------------
+    def speculate(self, session: int, jobs: list[TranslationJob], tgt: str,
+                  names: frozenset[str] = frozenset()) -> None:
+        """Translate blocks nobody asked for yet, in the background, so "Translate screen"
+        finds them done. Only with models that are already on disk (never a download), one
+        sentence at a time, and only while the user waits for nothing: a block asked for
+        (being read or translated) pauses it after the current sentence."""
+        with self._reread_cond:
+            self._bg.extend((session, tgt, names, job) for job in jobs)
+            if self._bg_running:
+                return
+            self._bg_running = True
+        self._bg_pool.submit(self._run_background)
+
+    def _foreground_busy(self) -> bool:
+        # The second reading of the screen goes first too: a click or Enter needs it, and the
+        # background would slow it down.
+        return bool(self._translating or self._urgent or self._urgent_reading or self._reading)
+
+    def _next_sentence(self):
+        """Wait until the foreground is idle, then hand out the next block of the background
+        queue. None when the queue is empty (the thread ends)."""
+        with self._reread_cond:
+            while True:
+                while self._bg and not self._alive(self._bg[0][0]):
+                    self._bg.popleft()
+                if not self._bg:
+                    self._bg_running = False
+                    return None
+                if not self._foreground_busy():
+                    return self._bg[0]
+                self._reread_cond.wait(0.2)
+
+    def _run_background(self) -> None:
+        from .translate.translator import split_sentences
+
+        t0, n = time.perf_counter(), 0
+        while (head := self._next_sentence()) is not None:
+            session, tgt, names, job = head
+            tr = self.translator
+            todo = []
+            try:
+                if not tr.needs_download(job.src, tgt):
+                    todo = [s for s in split_sentences(job.text)
+                            if not tr.sentences_cached(s, job.src, tgt, names)]
+            except Exception:  # noqa: BLE001 - background work is best effort
+                todo = []
+            if todo:
+                # One sentence per call: the foreground waits for at most one sentence.
+                try:
+                    tr.translate([todo[0]], job.src, tgt, names=names)
+                    n += 1
+                except Exception:  # noqa: BLE001 - the foreground will report it if it matters
+                    log.exception("Background translation failed")
+                    todo = []
+            if len(todo) <= 1:
+                with self._reread_cond:
+                    if self._bg and self._bg[0] is head:
+                        self._bg.popleft()
+        if n:
+            log.info("Background: %d sentence(s) translated in %.0f ms", n, (time.perf_counter() - t0) * 1000)
 
     def wait_translations(self, timeout: float = 10.0) -> bool:
         """Wait until no translation is queued or running (tests and tools)."""
@@ -403,6 +495,7 @@ class Engine(QObject):
         for pool in list(self._lang_pools.values()):
             pool.shutdown(wait=False, cancel_futures=True)
         self._reread_pool.shutdown(wait=False, cancel_futures=True)
+        self._bg_pool.shutdown(wait=False, cancel_futures=True)
         self._dl_pool.shutdown(wait=False, cancel_futures=True)
         self._load_pool.shutdown(wait=False, cancel_futures=True)
         self._ocr_pool.shutdown(wait=True, cancel_futures=True)

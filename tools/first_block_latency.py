@@ -33,7 +33,7 @@ for pair in sys.argv[1:]:
     times = []
     for _ in range(3):
         for text in BLOCKS[src]:
-            tr._cache.clear()
+            tr.clear_cache()
             t = time.perf_counter()
             out = tr.translate([text], src, tgt)[0]
             times.append((time.perf_counter() - t) * 1000)

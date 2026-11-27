@@ -279,6 +279,24 @@ def paint_shimmer(p: QPainter, rect: QRectF, radius: float, bg: QColor, elapsed_
     p.restore()
 
 
+def paint_wave_band(p: QPainter, area: QRectF, y: float, band: float, light_bg: bool, alpha: float) -> None:
+    """The front of the reveal wave: a soft horizontal band in the brand gradient at height
+    `y`, inside `area`, fading out above and below."""
+    if alpha <= 0.01:
+        return
+    p.save()
+    p.setClipRect(area)
+    colors = brand_gradient(area, light_bg).stops()
+    g = QLinearGradient(QPointF(area.left(), y), QPointF(area.right(), y))
+    for pos, color in colors:
+        g.setColorAt(pos, color)
+    # Three thin layers, the middle one strongest, read as a soft glow.
+    for k, (h, a) in enumerate(((band, 0.16), (band * 0.5, 0.3), (max(2.0, band * 0.16), 0.6))):
+        p.setOpacity(alpha * a)
+        p.fillRect(QRectF(area.left(), y - h / 2, area.width(), h), QBrush(g))
+    p.restore()
+
+
 # -- icons (drawn, so they follow the theme colour and DPI) ---------------------
 def icon_copy(p: QPainter, r: QRectF, color: QColor) -> None:
     s = min(r.width(), r.height())

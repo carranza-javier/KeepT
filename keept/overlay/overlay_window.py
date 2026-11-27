@@ -10,6 +10,7 @@ them, which keeps coordinates exact at 100 %, 125 %, 150 % and on any monitor.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import statistics
 import time
@@ -40,6 +41,11 @@ STROKE_PX = 4.0  # logical
 STROKE_FADE_MS = 220.0  # fade of the selection outline after release
 MIN_TEXT_PX = 10.0  # logical, smallest legible translated text
 FADE_MS = 220.0
+# Translating several blocks: each appears once every block above it is ready, in a wave that
+# runs down the screen at this speed, each block uncovered top to bottom in REVEAL_MS.
+REVEAL_MS = 340.0
+WAVE_PX_PER_MS = 2.2  # logical px
+WAVE_MAX_DELAY_MS = 450.0
 
 
 _UNTRANSLATABLE = re.compile(
@@ -374,10 +380,35 @@ class OverlayWindow(QWidget):
         if session != self.session or self.state == State.IDLE:
             return
         self.read_ids.update(ids)
+        self._speculate(ids)
         if self.items and not self._dispatch_queued:
             # Coalesce the blocks read in the same event loop turn into one translation batch.
             self._dispatch_queued = True
             QTimer.singleShot(0, self._dispatch)
+
+    def _speculate(self, ids) -> None:
+        """Translate the blocks just read in the background (nobody asked for them yet), so
+        "Translate screen" finds them done. Only languages whose models are on disk."""
+        translator = getattr(self.engine, "translator", None)
+        if translator is None or not hasattr(self.engine, "speculate"):
+            return
+        tgt = self.target
+        by_id = {b.id: b for b in self.blocks}
+        asked = {it.block.id for it in self.items.values()}
+        jobs = []
+        for i in ids:
+            b = by_id.get(i)
+            if b is None or i in asked or low_confidence(b) or looks_untranslatable(b.text):
+                continue
+            try:
+                lang = self._usable_language(b, tgt)
+                if lang == tgt or translator.needs_download(lang, tgt):
+                    continue
+            except Exception:  # noqa: BLE001 - no route: nothing to prepare
+                continue
+            jobs.append(TranslationJob(b.id, b.text, lang))
+        if jobs:
+            self.engine.speculate(self.session, jobs, tgt, protect.screen_names(b.text for b in self.blocks))
 
     def _on_ocr_failed(self, session: int, kind: str) -> None:
         if session != self.session or self.state == State.IDLE:
@@ -507,8 +538,11 @@ class OverlayWindow(QWidget):
             new.append(self._make_item(b))
         if not new:
             return
+        wave = len(new) >= 2  # several blocks appear in reading order (a click: at once)
         for it in new:
             it.status = "pending"
+            if wave:
+                it.meta["wave"] = True
             self.items[it.key] = it
             self.waiting.add(it.key)
         unread = [it.block.id for it in new if it.block.id not in self.read_ids]
@@ -658,8 +692,40 @@ class OverlayWindow(QWidget):
             log.exception("Fitting failed")
             item.status = "error"
             return
+        if item.status == "pending" and item.meta.get("wave"):
+            item.meta["ready"] = True
+            self._reveal_wave()
+            return
+        self._show(item, self.now())
+
+    def _reveal_wave(self) -> None:
+        """Show the translated blocks of a multi block request whose blocks above are all
+        ready, in a wave down the screen; the others keep the shimmer meanwhile."""
+        wave = [it for it in self.items.values() if it.status == "pending" and it.meta.get("wave")]
+        ready = [it for it in wave if it.meta.get("ready")]
+        if not ready:
+            return
+        blockers = [it.block.rect.y for it in wave if not it.meta.get("ready")]
+        now = self.now()
+        latest = max((it.t_done for it in self.items.values() if it.status == "done" and it.meta.get("wave")),
+                     default=now)
+        y0 = None
+        shown = False
+        for it in sorted(ready, key=lambda i: (i.block.rect.y, i.block.rect.x)):
+            y = it.block.rect.y
+            if any(by < y - it.block.line_height * 0.5 for by in blockers):
+                continue
+            y0 = y if y0 is None else y0
+            delay = min(WAVE_MAX_DELAY_MS, (y - y0) / self.scale / WAVE_PX_PER_MS)
+            # Never before a block above that is still being uncovered.
+            self._show(it, max(now + delay, min(latest, now + WAVE_MAX_DELAY_MS)))
+            shown = True
+        if shown:
+            self._on_translation_finished(self.session, 0.0)
+
+    def _show(self, item: Item, t_done: float) -> None:
         if item.status != "done":
-            item.t_done = self.now()
+            item.t_done = t_done
         item.status = "done"
         item.meta.pop("group", None)
         self._layout_group(item)
@@ -684,6 +750,7 @@ class OverlayWindow(QWidget):
             return
         for k in keys:
             self.items.pop(k, None)
+        self._reveal_wave()
         msg = {"network": "err_network", "disk": "err_disk", "integrity": "err_integrity",
                "unavailable": "err_translate"}.get(kind, "err_translate")
         if not self.items:
@@ -853,6 +920,8 @@ class OverlayWindow(QWidget):
         if t < 440:
             self.place_pill()
         self.toasts = [ts for ts in self.toasts if t - ts[2] < 1300]
+        if self.state == State.TRANSLATING:
+            self._reveal_wave()  # a pending block above may have been dropped (low confidence)
         self.update()
 
     def _stroke_shape(self, gesture: Gesture) -> QPainterPath:
@@ -912,6 +981,9 @@ class OverlayWindow(QWidget):
             return
         if it.status != "done" or it.layout is None:
             return
+        if it.meta.get("wave") and t < it.t_done + REVEAL_MS:
+            self._paint_reveal(p, it, t, phase, cover, radius, group)
+            return
         fade = effects.ease_out_cubic((t - it.t_done) / FADE_MS)
         if fade < 1 and phase != "text":
             effects.paint_shimmer(p, self.to_logical(it.block.cover_rect()), min(6.0, cover.height() / 4),
@@ -931,6 +1003,37 @@ class OverlayWindow(QWidget):
         if phase != "bg":
             self._paint_text(p, it)
         p.restore()
+
+    def _paint_reveal(self, p: QPainter, it: Item, t: float, phase: str, cover: QRectF, radius: float,
+                      group) -> None:
+        """A block of a wave being uncovered: a soft band in the brand gradient runs down it,
+        the translation above the band, the waiting shimmer still below it."""
+        e = effects.ease_in_out((t - it.t_done) / REVEAL_MS)
+        area = self.to_logical(it.block.cover_rect()).united(cover)
+        band = max(6.0, min(22.0, area.height() * 0.4))
+        front = area.top() - band / 2 + (area.height() + band) * e
+        if phase != "text":
+            p.save()
+            p.setClipRect(QRectF(area.left() - 2, front, area.width() + 4, max(0.0, area.bottom() - front + 2)))
+            effects.paint_shimmer(p, area, min(6.0, area.height() / 4), it.bg, t)
+            p.restore()
+        alpha = 1 - self.original_mix
+        if alpha > 0.01 and front > area.top():
+            p.save()
+            p.setOpacity(alpha)
+            room = group[1] if group else it.meta.get("room")
+            if room is not None:
+                p.setClipRect(self.to_logical(room))
+            p.setClipRect(QRectF(0, 0, self.width(), front), Qt.IntersectClip)
+            if phase != "text":
+                path = QPainterPath()
+                path.addRoundedRect(cover, radius, radius)
+                p.fillPath(path, it.bg)
+            if phase != "bg":
+                self._paint_text(p, it)
+            p.restore()
+        if phase != "bg":
+            effects.paint_wave_band(p, area, front, band, it.bg.lightnessF() > 0.5, math.sin(math.pi * e) ** 2)
 
     def _layout_group(self, item: Item) -> None:
         """Parts of one original line, once all are translated, are laid out together: one font

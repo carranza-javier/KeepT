@@ -465,3 +465,13 @@ def test_install_package_checks_the_manifest(tmp_path):
     with pytest.raises(ModelError) as err:
         store2.install_package(pkg, "en", "es")
     assert err.value.kind == "integrity" and store2.get("en", "es") is None
+
+
+def test_sentences_translated_in_the_background_are_reused(translator):
+    translator.translate(["Zweiter Satz."], "de", "es")  # the background, one sentence
+    model = translator.loaded[("de", "es")]
+    model.calls.clear()
+    out = translator.translate(["Erster Satz. Zweiter Satz."], "de", "es")
+    assert out == ["[de>es]Erster Satz. [de>es]Zweiter Satz."]
+    assert model.calls == [["Erster Satz."]]
+    assert translator.sentences_cached("Erster Satz. Zweiter Satz.", "de", "es")

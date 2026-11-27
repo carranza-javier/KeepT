@@ -140,6 +140,9 @@ def main() -> int:
     ap.add_argument("--warm", help="source languages: warm up OCR and load their models first, as the app does")
     ap.add_argument("--pick", default="", help="text a block starts with, for the click and rect timings")
     ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--frames", action="store_true", help="page: save frames while the blocks appear")
+    ap.add_argument("--wait", type=float, default=0.3,
+                    help="page: seconds between the end of the OCR and Enter (-1: Enter right after the hotkey)")
     args = ap.parse_args()
 
     services().init_process()
@@ -248,7 +251,7 @@ def timing(d: "Driver", args) -> int:
 
     for run in range(args.runs):
         for kind in ("click", "rect", "enter_now"):
-            d.engine.translator._cache.clear()
+            d.engine.translator.clear_cache()
             t_hotkey = time.perf_counter()
             d.ov.open(d.capture, t_hotkey)
             if kind == "enter_now":
@@ -296,15 +299,19 @@ def page(d: "Driver", args) -> int:
     """"Translate screen" (Enter) on the whole page once its OCR is done: time to the first
     translated block and to the last one, and the order in which the languages appear."""
     for run in range(args.runs):
-        d.engine.translator._cache.clear()
+        d.engine.translator.clear_cache()
         d.ov.open(d.capture, time.perf_counter())
-        d.wait_until(lambda: d.ov.ocr_done, 10000)
-        d.pump(300)
+        if args.wait < 0:
+            d.pump(30)  # Enter right after the hotkey, before the OCR is done
+        else:
+            d.wait_until(lambda: d.ov.ocr_done, 10000)
+            d.pump(args.wait * 1000)
         t0 = time.perf_counter()
         d.key(Qt.Key_Return)
         first = None
         order: list[str] = []
         seen: set[int] = set()
+        shots: list[int] = []
         while time.perf_counter() - t0 < 60:
             QApplication.processEvents()
             for k, it in d.ov.items.items():
@@ -312,12 +319,22 @@ def page(d: "Driver", args) -> int:
                     seen.add(k)
                     order.append(it.block.lang or "?")
                     first = first or time.perf_counter() - t0
+            if run == 0 and args.frames and len(shots) < 4 and time.perf_counter() - t0 > 0.08 * (len(shots) + 1) + (first or 9):
+                shots.append(1)
+                d.shot(f"wave_{len(shots)}")
             if d.translation_done():
                 break
             time.sleep(0.002)
         total = time.perf_counter() - t0
+        # The page is fully visible when the last block has been uncovered.
+        from keept.overlay.overlay_window import REVEAL_MS
+
+        end = max((it.t_done for it in d.ov.items.values() if it.status == "done"), default=d.ov.now())
+        if end + REVEAL_MS > d.ov.now():
+            d.pump(end + REVEAL_MS - d.ov.now())
+        visible = time.perf_counter() - t0
         print(f"run {run} page: first block {first * 1000:.0f} ms, all {len(seen)} blocks {total * 1000:.0f} ms,"
-              f" order {''.join(l[0] for l in order)}", flush=True)
+              f" whole page visible {visible * 1000:.0f} ms, order {''.join(l[0] for l in order)}", flush=True)
         if run == 0:
             d.pump(400)
             d.shot("page")
