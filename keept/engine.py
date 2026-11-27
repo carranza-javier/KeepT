@@ -67,6 +67,7 @@ class Engine(QObject):
         self._urgent_reading = 0  # blocks the user asked for being read right now
         self._taken: set[int] = set()  # blocks of the current session read or being read
         self._reading = False  # second reading of a screen in progress
+        self._asked_many = False  # several blocks asked for at once in this session
         # Downloads get their own thread so a long model download never blocks translating
         # with the models that are already there.
         self._dl_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-download")
@@ -109,6 +110,7 @@ class Engine(QObject):
         with self._reread_cond:
             self._urgent = []
             self._taken = set()
+            self._asked_many = False
         self.ocr_finished.emit(session, result)
         self._reread(session, result.blocks, bgra)
 
@@ -117,6 +119,8 @@ class Engine(QObject):
         with self._reread_cond:
             if self._alive(session):
                 # Blocks already read (or being read) are not waited for.
+                if len(block_ids) >= 2:
+                    self._asked_many = True
                 block_ids = [i for i in block_ids if i not in self._taken]
                 self._urgent = [*block_ids, *(i for i in self._urgent if i not in block_ids)]
                 self._reread_cond.notify_all()
@@ -156,14 +160,16 @@ class Engine(QObject):
                 while self._alive(session) and len(taken) < len(by_id):
                     urgent = [i for i in self._urgent if todo.get(i)]
                     self._urgent = urgent
-                    # Helpers join only when there is more than one line to read for the user.
-                    if urgent and (not helper or sum(len(todo[i]) for i in urgent) >= 2):
-                        bid = max(urgent, key=remaining) if helper and len(urgent) >= 2 else urgent[0]
+                    # Helpers join only after several blocks were asked for (Enter, a selection): their
+                    # one thread sessions are slower per line, so for one block (a click) the
+                    # main thread alone is faster (measured: 123 ms vs 400-500 ms per line).
+                    if urgent and (not helper or self._asked_many):
+                        bid = max(urgent, key=remaining) if helper else urgent[0]
                         self._urgent_reading += 1
                         return bid, pop(bid), True
-                    if helper or self._translating:
-                        # Lines nobody asked for yet wait while a translation runs: both need
-                        # the CPU, and the translation is what the user is waiting for.
+                    if helper or self._translating or self._urgent_reading:
+                        # Lines nobody asked for yet wait while the user waits for something
+                        # (a line being read for them, a translation): both need the CPU.
                         self._reread_cond.wait(0.1)
                         continue
                     bid = next(i for i in rest if todo[i])

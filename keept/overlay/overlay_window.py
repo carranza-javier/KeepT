@@ -184,6 +184,8 @@ class OverlayWindow(QWidget):
         self.waiting: set[int] = set()  # items (shimmering) waiting for that reading
         self._dispatch_queued = False
         self._hovered = -1
+        self._hover_block = -1  # block under the pointer
+        self._prefetched: set[int] = set()  # blocks translated ahead because of the pointer
         self.stroke: list[QPointF] = []  # logical points
         self.stroke_tool = "mouse"
         self.dragging = False
@@ -223,6 +225,8 @@ class OverlayWindow(QWidget):
         OverlayWindow._session_counter += 1
         self.session = OverlayWindow._session_counter
         self._asked_all = False
+        self._hover_block = -1
+        self._prefetched = set()
         self.engine.set_active(self.session)
         self._reset_session_state()
         self._t_hotkey = t_hotkey
@@ -386,29 +390,45 @@ class OverlayWindow(QWidget):
             self._dispatch_queued = True
             QTimer.singleShot(0, self._dispatch)
 
+    def _ahead_job(self, b: Block) -> TranslationJob | None:
+        """A job to translate a block nobody asked for yet, or None if it would not be
+        translated, or only after downloading a model (never done ahead of time)."""
+        translator = getattr(self.engine, "translator", None)
+        if translator is None or b.id not in self.read_ids or low_confidence(b) or looks_untranslatable(b.text):
+            return None
+        if any(it.block.id == b.id for it in self.items.values()):
+            return None
+        try:
+            lang = self._usable_language(b, self.target)
+            if lang == self.target or translator.needs_download(lang, self.target):
+                return None
+        except Exception:  # noqa: BLE001 - no route: nothing to prepare
+            return None
+        return TranslationJob(b.id, b.text, lang)
+
     def _speculate(self, ids) -> None:
         """Translate the blocks just read in the background (nobody asked for them yet), so
         "Translate screen" finds them done. Only languages whose models are on disk."""
-        translator = getattr(self.engine, "translator", None)
-        if translator is None or not hasattr(self.engine, "speculate") or self._asked_all:
+        if not hasattr(self.engine, "speculate") or self._asked_all:
             return  # with the whole screen asked for, everything goes to the foreground
-        tgt = self.target
         by_id = {b.id: b for b in self.blocks}
-        asked = {it.block.id for it in self.items.values()}
-        jobs = []
-        for i in ids:
-            b = by_id.get(i)
-            if b is None or i in asked or low_confidence(b) or looks_untranslatable(b.text):
-                continue
-            try:
-                lang = self._usable_language(b, tgt)
-                if lang == tgt or translator.needs_download(lang, tgt):
-                    continue
-            except Exception:  # noqa: BLE001 - no route: nothing to prepare
-                continue
-            jobs.append(TranslationJob(b.id, b.text, lang))
+        jobs = [j for i in ids if i in by_id and (j := self._ahead_job(by_id[i])) is not None]
         if jobs:
-            self.engine.speculate(self.session, jobs, tgt, protect.screen_names(b.text for b in self.blocks))
+            self.engine.speculate(self.session, jobs, self.target, protect.screen_names(b.text for b in self.blocks))
+        self._prefetch_hovered()
+
+    def _prefetch_hovered(self) -> None:
+        """The pointer rests on a block: it is probably the next one clicked, so translate it
+        now (as soon as it is read), at the priority of a click. The click then finds it done
+        or on its way; the translation itself is shown only if it is asked for."""
+        if self.dragging or self._hover_block < 0 or self._hover_block in self._prefetched:
+            return
+        b = next((b for b in self.blocks if b.id == self._hover_block), None)
+        job = self._ahead_job(b) if b is not None else None
+        if job is None:
+            return
+        self._prefetched.add(b.id)
+        self.engine.translate(self.session, [job], self.target, protect.screen_names(x.text for x in self.blocks))
 
     def _on_ocr_failed(self, session: int, kind: str) -> None:
         if session != self.session or self.state == State.IDLE:
@@ -866,6 +886,9 @@ class OverlayWindow(QWidget):
         pos = e.position()
         x, y = self.to_phys(pos)
         under = block_at(self.blocks, x, y) if self.ocr_done else None
+        self._hover_block = under.id if under is not None else -1
+        if under is not None and not self.dragging:
+            self._prefetch_hovered()
         if under is not None and under.id not in self.read_ids and under.id != self._hovered:
             # The pointer goes to a block before clicking it or while selecting it: read that
             # block first, so its translation does not wait for the second OCR reading.

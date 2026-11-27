@@ -292,6 +292,12 @@ def timing(d: "Driver", args) -> int:
                     d._mouse(QEvent.MouseButtonRelease, pts[-1], Qt.LeftButton, Qt.NoButton)
             ms = first_done_ms(t0)
             hot = (time.perf_counter() - t_hotkey) * 1000
+            import builtins  # timeline of reads and translations, filled by an instrumenting wrapper
+
+            for a, b2, *rest in sorted(getattr(builtins, "KEEPT_EV", [])):
+                if b2 >= t0 - 0.6:
+                    print(f"   {(a - t0) * 1000:6.0f} {(b2 - t0) * 1000:6.0f}", *rest)
+            getattr(builtins, "KEEPT_EV", []).clear()
             results.setdefault(kind, []).append(ms or -1)
             print(f"run {run} {kind:9s}: first block {ms:.0f} ms after the request, {hot:.0f} ms after the hotkey", flush=True)
             if run == 0:
