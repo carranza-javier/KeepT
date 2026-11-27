@@ -14,7 +14,7 @@ No copying and pasting into a translator. No accounts, no API keys, no "please s
 
 **[Download KeepT for Windows](https://github.com/carranza-javier/KeepT/releases)** and run `KeepT-Setup-x.y.z.exe` from the newest release (about 65 MB, Windows 10 or 11, 64-bit). No administrator rights needed.
 
-A heads-up: Windows will probably look at the installer with suspicion ("Windows protected your PC"). That's only because it isn't signed yet, not because KeepT is up to something. Click **More info**, then **Run anyway**. If you like to double-check, every release lists the installer's SHA-256 (`Get-FileHash .\KeepT-Setup-0.10.0.exe -Algorithm SHA256` in PowerShell).
+A heads-up: Windows will probably look at the installer with suspicion ("Windows protected your PC"). That's only because it isn't signed yet, not because KeepT is up to something. Click **More info**, then **Run anyway**. If you like to double-check, every release lists the installer's SHA-256 (`Get-FileHash .\KeepT-Setup-0.11.0.exe -Algorithm SHA256` in PowerShell).
 
 KeepT is still young, so 0.x versions come out as pre-releases. To uninstall it, go to Settings > Apps; it takes its models and settings with it.
 
