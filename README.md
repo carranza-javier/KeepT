@@ -41,7 +41,7 @@ KeepT translates between German, English, Spanish, French, Italian, Portuguese, 
 
 The app and the installer are also available in these eight languages. They follow the Windows display language and use English when Windows is in any other language.
 
-No model ships inside the installer. Each one (about 80 to 250 MB) is downloaded once: during installation for the languages you choose, from the tray "Languages" window, or the first time you translate text in another language, with the progress shown in the pill. Models are kept in `%LOCALAPPDATA%\KeepT\models` and can be deleted from the tray. After 10 minutes without use KeepT frees them from memory, and it reloads them in the background as soon as you press the shortcut.
+No translation model ships inside the installer. Each one (about 80 to 250 MB) is downloaded once: during installation for the languages you choose, from the tray "Languages" window, or the first time you translate text in another language, with the progress shown in the pill. Models are kept in `%LOCALAPPDATA%\KeepT\models` and can be deleted from the tray. After 10 minutes without use KeepT frees them from memory, and it reloads them in the background as soon as you press the shortcut.
 
 E-mail addresses and links are never translated. Numbers, dates, times, amounts and Swiss place names (the official list of municipalities, and the word after a Swiss postal code such as "3999 Musterwil") come out exactly as they are on the screen: if the translation of a sentence changes one of them, the sentence is translated again with these parts protected, and if that still fails it stays in the original language rather than show a wrong date or amount.
 
@@ -83,7 +83,7 @@ python -m venv .venv
 These tools work without touching the real mouse or keyboard:
 
 - `tools/make_test_screen.py` renders a synthetic screen with known German, English and Spanish text.
-- `tools/drive_overlay.py IMAGE` drives the real overlay with synthetic input and saves frames.
+- `tools/drive_overlay.py IMAGE` drives the real overlay with synthetic input and saves frames; with `--warm de,fr --scenario timing` it measures the time to the first translated block after a click, a rectangle and Enter.
 - `tools/ocr_dump.py IMAGE` prints the text blocks and languages KeepT detects.
 - `tools/render_letter.py OUT.png [ZOOM]` renders the multilingual sample letter in `docs/` (used by `tests/test_letter.py`).
 - The overlay is kept out of screen captures only while it is closed, so KeepT never reads its own translation, while screenshots of an open overlay (Win+Shift+S) show it.
