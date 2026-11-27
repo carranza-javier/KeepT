@@ -1,6 +1,6 @@
 """Credits required by the licenses of the translation models and the bundled libraries.
 
-Used by the "About KeepT" window in the tray menu; the README carries the same list.
+Used by the "About KeepT" window in the tray menu; docs/CREDITS.md carries the same list.
 Full license texts ship with the app in the "licenses" folder.
 """
 

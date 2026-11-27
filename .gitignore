@@ -1,6 +1,7 @@
-# Local docs: only README.md is versioned
+# Local docs: only README.md and the linked pages in docs/ are versioned
 *.md
 !README.md
+!docs/*.md
 CLAUDE.md
 DECISIONS.md
 

@@ -553,7 +553,7 @@ class OverlayWindow(QWidget):
                 continue
             todo.append(it)
         if redo:
-            log.info("Translating %d block(s) again with the names %s", len(redo), ", ".join(sorted(names)))
+            log.info("Translating %d block(s) again with %d screen name(s) protected", len(redo), len(names))
         todo += redo
         if todo:
             langs = Counter(it.block.lang or self.screen_lang or "en" for it in todo)
@@ -647,7 +647,7 @@ class OverlayWindow(QWidget):
         leftovers = foreign_leftovers(item.block.text, text, self.target)
         if leftovers:
             # A half translated text ("Publicación notes") is worse than the original: keep it.
-            log.info("Discarded a mixed translation of block %d (%s left untranslated)", key, ", ".join(leftovers))
+            log.info("Discarded a mixed translation of block %d (%d word(s) left untranslated)", key, len(leftovers))
             del self.items[key]
             return
         item.text = text
