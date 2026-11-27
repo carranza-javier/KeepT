@@ -251,6 +251,13 @@ class Translator:
                     nxt = level[i] + 1
                     if nxt == 1 and not item.has("name"):
                         nxt = 2  # nothing to mask at level 1
+                    # A level that masks nothing more would send the very same text again.
+                    while nxt < item.max_level() and item.masked(nxt) == item.masked(level[i]):
+                        nxt += 1
+                    if item.masked(nxt) == item.masked(level[i]):
+                        log.info("Kept a sentence untranslated: its numbers or names did not survive")
+                        results[i] = item.text
+                        continue
                     level[i] = nxt
                     retry.append(i)
                 else:
