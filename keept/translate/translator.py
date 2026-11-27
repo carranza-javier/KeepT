@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import threading
 import unicodedata
@@ -88,7 +87,9 @@ class Translator:
         self.store = store or ModelStore()
         # Two threads per model: measured as fast as six for one block, and the models of the
         # languages of a page run at the same time (see Engine), each with its own threads.
-        self._threads = 2 if (os.cpu_count() or 4) >= 4 else 1
+        from ..cpu import translation_threads
+
+        self._threads = translation_threads()
         # Keep only an external loader here: storing the bound self._default_loader would create
         # a reference cycle that kept every CTranslate2 model alive until the interpreter shut
         # down, and freeing them that late crashed the process at exit.

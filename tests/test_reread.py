@@ -37,11 +37,14 @@ def test_tidy_keeps_one_position_per_character():
 
 class FakeRecognizer:
     def __init__(self, readings):
-        self.readings = readings
+        self.readings = list(readings)
+        self.calls = 0
 
     def read(self, bgra, rects):
-        assert len(rects) == len(self.readings)
-        return [Reading(t, c, [float(i) for i in range(len(t))]) for t, c in self.readings]
+        out = [Reading(t, c, [float(i) for i in range(len(t))]) for t, c in self.readings[:len(rects)]]
+        del self.readings[:len(rects)]
+        self.calls += 1
+        return out
 
 
 def test_reread_replaces_the_text_and_keeps_the_lines():
@@ -79,3 +82,17 @@ def test_real_recognizer_reads_what_windows_ocr_misreads():
     # Windows OCR: "Dal 10 dicembre ... il martedi invece del lunedi_ Si prega"
     assert r.text == "Dal 1° dicembre 2026 i rifiuti domestici saranno raccolti il martedì invece del lunedì. Si prega"
     assert r.confidence > 0.9
+
+
+def test_reread_stops_between_lines_and_goes_on_later():
+    lines = [line(("lunedi_", 0, 60), ("Si", 65, 15)), line(("puö", 0, 30))]
+    block = Block(lines)
+    rec = FakeRecognizer([("lunedì. Si", 0.99), ("può", 0.97)])
+    bgra = np.zeros((40, 200, 4), np.uint8)
+    assert reread_block(block, bgra, rec, stop=lambda: True) is False
+    assert rec.calls == 1 and "confidence" not in block.meta
+    assert reread_block(block, bgra, rec, stop=lambda: True) is False  # yields before reading more
+    assert rec.calls == 1
+    assert reread_block(block, bgra, rec) is True
+    assert block.text == "lunedì. Si può"
+    assert block.meta["confidence"] > 0.9

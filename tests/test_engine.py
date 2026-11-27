@@ -104,3 +104,12 @@ def test_languages_translate_in_parallel_and_queued_blocks_go_in_one_batch():
     assert elapsed < 0.55  # three languages at once, then one German batch: 2 x 0.2 s
     assert [c for c in calls if c[0] == "de"] == [("de", 1), ("de", 2)]
     engine.shutdown()
+
+
+def test_thread_budget_follows_the_cores(monkeypatch):
+    from keept import cpu
+
+    monkeypatch.setattr(cpu, "cores", lambda: 2)
+    assert (cpu.recognizer_threads(), cpu.reread_helpers(), cpu.translation_threads(), cpu.translation_slots()) == (2, 0, 1, 1)
+    monkeypatch.setattr(cpu, "cores", lambda: 12)
+    assert (cpu.recognizer_threads(), cpu.reread_helpers(), cpu.translation_threads(), cpu.translation_slots()) == (4, 3, 2, 4)

@@ -277,6 +277,17 @@ class WindowsServices:
         if win_id and user32.IsWindow(wt.HWND(win_id)):
             user32.SetForegroundWindow(wt.HWND(win_id))
 
+    def usable_cpus(self) -> int | None:
+        """Logical CPUs the process may run on (its affinity mask): os.process_cpu_count()
+        ignores the affinity on Windows."""
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        proc, system = ctypes.c_size_t(), ctypes.c_size_t()
+        if not k32.GetProcessAffinityMask(ctypes.c_void_p(k32.GetCurrentProcess()), ctypes.byref(proc),
+                                          ctypes.byref(system)):
+            return None
+        return bin(proc.value).count("1") or None
+
     def open_folder(self, path: Path) -> None:
         import os
 

@@ -19,8 +19,6 @@ from .translate.translator import Translator, route
 
 log = logging.getLogger(__name__)
 
-# Threads that help the OCR thread with the second reading of the blocks.
-REREAD_HELPERS = 3
 # Blocks of one language translated in one call at most (CTranslate2 batches their sentences).
 MAX_BATCH = 8
 
@@ -46,13 +44,19 @@ class Engine(QObject):
         super().__init__(parent)
         self.translator = translator or Translator()
         self._ocr_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-ocr")
-        self._reread_pool = ThreadPoolExecutor(REREAD_HELPERS, thread_name_prefix="keept-reread")
+        from .cpu import reread_helpers
+
+        self._helpers = reread_helpers()
+        self._reread_pool = ThreadPoolExecutor(max(1, self._helpers), thread_name_prefix="keept-reread")
         # Preloads and releases of models run here, one at a time.
         self._tr_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-translate")
         # Translations get one thread per source language: each language has its own model,
         # so a page in German, French and Italian translates the three at the same time,
         # while the blocks of one language keep their reading order.
         self._lang_pools: dict[str, ThreadPoolExecutor] = {}
+        from .cpu import translation_slots
+
+        self._tr_slots = threading.Semaphore(translation_slots())
         self._queues: dict[str, deque] = {}  # source language -> (session, tgt, names, job)
         self._draining: set[str] = set()  # languages whose thread is working on its queue
         self._first_done = -1  # last session that already has a translated block
@@ -119,7 +123,7 @@ class Engine(QObject):
 
     def _reread(self, session: int, blocks, bgra: np.ndarray) -> None:
         """Second reading of every block until done or a new session. The OCR thread reads
-        the screen in reading order; the blocks the user asks for go first, and REREAD_HELPERS
+        the screen in reading order; the blocks the user asks for go first, and a few
         more threads read them too, one block each (the recognizer is thread safe), so they
         reach translation sooner."""
         from .ocr.recognizer import recognizer
@@ -156,14 +160,28 @@ class Engine(QObject):
                     return nxt
                 return None
 
+        def yield_to_user() -> bool:
+            # A block nobody asked for stops between two lines when the user waits for
+            # something: a block to read or a translation (on a two core PC a paragraph takes
+            # half a second to read, too long to finish first).
+            with self._reread_cond:
+                return bool(self._translating or any(i not in taken for i in self._urgent))
+
         def work(helper: bool = False) -> None:
             reader = recognizer(single_thread=True) if helper else rec
             while (nxt := take(helper)) is not None:
                 try:
-                    reread_block(by_id[nxt], bgra, reader)
+                    finished = reread_block(by_id[nxt], bgra, reader,
+                                            None if nxt in asked else yield_to_user)
                 except Exception:  # noqa: BLE001 - keep the Windows OCR reading of this block
                     log.exception("Second reading of block %d failed", nxt)
+                    by_id[nxt].meta.pop("_read", None)
                     by_id[nxt].meta["confidence"] = 1.0
+                    finished = True
+                if not finished:
+                    with self._reread_cond:
+                        taken.discard(nxt)  # taken again later, from the line it stopped at
+                    continue
                 done.append(nxt)
                 if nxt in asked:
                     with self._reread_cond:
@@ -175,7 +193,7 @@ class Engine(QObject):
         with self._reread_cond:
             self._reading = True
         try:
-            helpers = [self._reread_pool.submit(work, True) for _ in range(REREAD_HELPERS)]
+            helpers = [self._reread_pool.submit(work, True) for _ in range(self._helpers)]
             work()
             for f in helpers:
                 f.result()
@@ -366,7 +384,8 @@ class Engine(QObject):
             return
         tc = time.perf_counter()
         try:
-            results = self.translator.translate([j.text for j in jobs], src, tgt, names=names)
+            with self._tr_slots:
+                results = self.translator.translate([j.text for j in jobs], src, tgt, names=names)
         except Exception:  # noqa: BLE001
             log.exception("Translation failed")
             self.translation_failed.emit(session, "translate", [j.key for j in jobs])

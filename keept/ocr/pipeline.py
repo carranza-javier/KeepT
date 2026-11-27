@@ -80,20 +80,26 @@ def _tidy(text: str, xs: list[float], inline: bool) -> tuple[str, list[float]]:
     return "".join(c for c, _ in out), [x for _, x in out]
 
 
-def reread_block(block: Block, bgra: np.ndarray, rec) -> None:
-    """Read the lines of a block again with the line recognizer and keep its confidence."""
+def reread_block(block: Block, bgra: np.ndarray, rec, stop=None) -> bool:
+    """Read the lines of a block again with the line recognizer and keep its confidence.
+    `stop()` is checked between lines: when it says so, the block is left half read (the
+    lines read so far are kept) and False is returned; a later call goes on from there."""
     if rec is None:
         block.meta["confidence"] = 1.0
-        return
-    readings = rec.read(bgra, [l.rect for l in block.lines])
-    confs, weights = [], []
-    for line, reading in zip(block.lines, readings):
+        return True
+    confs, weights = block.meta.setdefault("_read", ([], []))
+    for line in block.lines[len(confs):]:
+        if confs and stop is not None and stop():
+            return False
+        reading = rec.read(bgra, [line.rect])[0]
         text, xs = _tidy(reading.text, reading.char_x, line.inline)
         confs.append(reading.confidence)
         weights.append(max(1, len(text)))
         if text:
             line.words = _words_from(text, xs, line)
+    del block.meta["_read"]
     block.meta["confidence"] = sum(c * w for c, w in zip(confs, weights)) / sum(weights) if weights else 0.0
+    return True
 
 
 def low_confidence(block: Block) -> bool:

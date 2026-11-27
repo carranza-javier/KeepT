@@ -27,7 +27,6 @@ MODEL = Path(__file__).with_name("latin_PP-OCRv5_rec_mobile.onnx")
 HEIGHT = 48  # input height of the model
 MIN_RATIO = 320 / 48  # the model was trained on inputs at least this wide
 BATCH = 1  # measured: padding lines of a batch to the widest one costs more than it saves
-THREADS = 4
 
 
 @dataclass
@@ -55,8 +54,13 @@ def _resize(bgra: np.ndarray, nh: int, nw: int) -> np.ndarray:
 class LineRecognizer:
     """Thread safe: onnxruntime sessions can run from several threads at once."""
 
-    def __init__(self, path: Path = MODEL, threads: int = THREADS) -> None:
+    def __init__(self, path: Path = MODEL, threads: int | None = None) -> None:
         import onnxruntime as ort
+
+        from ..cpu import recognizer_threads
+
+        if threads is None:
+            threads = recognizer_threads()
 
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = threads
