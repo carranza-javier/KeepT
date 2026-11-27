@@ -4,6 +4,10 @@ Works without touching the real mouse/keyboard (events are posted to the widget)
 so it also runs while the Windows session is locked.
 
     python tools/drive_overlay.py shots/test150.png --out shots/run --scenario all
+
+Timing as in the app (engines warmed up and models loaded before the hotkey):
+
+    python tools/drive_overlay.py screen.png --warm de,fr,it,en --scenario timing --pick "Ab dem"
 """
 
 from __future__ import annotations
@@ -129,6 +133,9 @@ def main() -> int:
     ap.add_argument("--target", default="es")
     ap.add_argument("--device")
     ap.add_argument("--debug-blocks", action="store_true")
+    ap.add_argument("--warm", help="source languages: warm up OCR and load their models first, as the app does")
+    ap.add_argument("--pick", default="", help="text a block starts with, for the click and rect timings")
+    ap.add_argument("--runs", type=int, default=3)
     args = ap.parse_args()
 
     services().init_process()
@@ -138,6 +145,20 @@ def main() -> int:
     i18n.set_ui_lang(services().system_language())
     d = Driver(args.image, Path(args.out), args.dark, args.target, args.device, args.debug_blocks)
     sc = args.scenario
+
+    if args.warm:
+        sources = args.warm.split(",")
+        d.engine.warm_up(sources[0])
+        d.ov.warm_up()
+        d.engine.preload(args.target, download=False, sources=sources)
+        from keept.translate.translator import route
+
+        need = {p for src in sources for p in route(src, args.target)}
+        d.wait_until(lambda: need <= set(d.engine.translator.loaded_pairs()), 60000)
+        d.pump(1500)  # warm up and preload run on worker threads
+
+    if sc == "timing":
+        return timing(d, args)
 
     d.open()
     d.pump(110)
@@ -202,6 +223,65 @@ def main() -> int:
     d.key(Qt.Key_Escape)
     d.pump(50)
     print("state after Esc:", d.ov.state)
+    d.engine.shutdown()
+    return 0
+
+
+def timing(d: "Driver", args) -> int:
+    """Time from the request to the first translated block on screen, for a click on a block (the
+    pointer rests on it 250 ms before), a rectangle drawn around it in 300 ms and Enter pressed
+    right after the hotkey (OCR not finished yet). The user looks at the screen 300 ms first."""
+    results: dict[str, list[float]] = {}
+
+    def first_done_ms(t0: float) -> float | None:
+        ok = d.wait_until(lambda: any(i.status == "done" for i in d.ov.items.values()), 60000)
+        return (time.perf_counter() - t0) * 1000 if ok else None
+
+    def find_block():
+        return next(b for b in d.ov.blocks if b.text.startswith(args.pick)) if args.pick else d.ov.blocks[len(d.ov.blocks) // 2]
+
+    for run in range(args.runs):
+        for kind in ("click", "rect", "enter_now"):
+            d.engine.translator._cache.clear()
+            t_hotkey = time.perf_counter()
+            d.ov.open(d.capture, t_hotkey)
+            if kind == "enter_now":
+                d.pump(30)
+                t0 = time.perf_counter()
+                d.key(Qt.Key_Return)
+            else:
+                d.wait_until(lambda: d.ov.ocr_done, 10000)
+                d.pump(300)  # the user needs a moment to aim
+                b = find_block()
+                if kind == "click":
+                    # The pointer reaches the block, then the click comes about 250 ms later.
+                    d._mouse(QEvent.MouseMove, d.phys_to_logical(b.rect.x + 5, b.rect.cy), Qt.NoButton, Qt.NoButton)
+                    d.pump(250)
+                    t0 = time.perf_counter()
+                    d.click(b.rect.x + 5, b.rect.cy)
+                else:
+                    # A rectangle drawn around the block in about 300 ms; timed from the release.
+                    r = b.rect
+                    pts = [d.phys_to_logical(r.x - 10 + i * (r.w + 20) / 10, r.y - 8 + i * (r.h + 16) / 10) for i in range(11)]
+                    d._mouse(QEvent.MouseButtonPress, pts[0], Qt.LeftButton, Qt.LeftButton)
+                    for pt in pts[1:]:
+                        d._mouse(QEvent.MouseMove, pt, Qt.NoButton, Qt.LeftButton)
+                        d.pump(30)
+                    t0 = time.perf_counter()
+                    d._mouse(QEvent.MouseButtonRelease, pts[-1], Qt.LeftButton, Qt.NoButton)
+            ms = first_done_ms(t0)
+            hot = (time.perf_counter() - t_hotkey) * 1000
+            results.setdefault(kind, []).append(ms or -1)
+            print(f"run {run} {kind:9s}: first block {ms:.0f} ms after the request, {hot:.0f} ms after the hotkey", flush=True)
+            if run == 0:
+                d.wait_until(d.translation_done, 60000)
+                d.pump(400)
+                d.shot(f"timing_{kind}")
+            d.key(Qt.Key_Escape)
+            d.pump(300)
+    for kind, values in results.items():
+        values.sort()
+        print(f"{kind:9s}: median {values[len(values) // 2]:.0f} ms, all {[round(v) for v in values]}")
     d.engine.shutdown()
     return 0
 
