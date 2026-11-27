@@ -41,7 +41,6 @@ _MONTHS = (r"januar|februar|märz|april|mai|juni|juli|august|september|oktober|n
 _CAP = r"[A-ZÄÖÜÉÈÀÂÊÎÔÛÇ][\w’'-]*"
 # "3999 Musterwil", "CH-8001 Zürich": an address part, so at the start of the text, after a
 # separator or a house number, and the name ends the part ("1500 Meter hoch" is no address).
-# The name may hold OCR noise ("3999 Muster,vil"), so it runs to the next space or separator.
 POSTCODE = re.compile(r"(?<![\w.'’])(?:CH-)?([1-9]\d{3})\s+([A-ZÄÖÜÉÈÀÂÊÎÔÛÇ][^\s;•·|()]*?)(?=,?(?:\s|$|[;•·|)]))")
 _BEFORE_OK = re.compile(r"(?:^|[,;•·|(]|\d[a-z]?|\s[-–])\s*$")
 _AFTER_OK = re.compile(r"^(?:\s*$|\s*[,;•·|)]|\s{2,}|\s+[-–]\s)")
@@ -86,18 +85,6 @@ def _letters(word: str) -> str:
     return "".join(c for c in word if c.isalpha()).lower()
 
 
-def _close(a: str, b: str) -> bool:
-    """Same word up to one OCR mistake (a letter changed, added or dropped), for long names."""
-    if a == b:
-        return True
-    if min(len(a), len(b)) < 6 or abs(len(a) - len(b)) > 1:
-        return False
-    if len(a) == len(b):
-        return sum(x != y for x, y in zip(a, b)) <= 1
-    short, long_ = sorted((a, b), key=len)
-    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
-
-
 _CAP_WORD = re.compile(r"(?<![\w-])[A-ZÄÖÜÉÈÀÂÊÎÔÛÇ][\w’'-]*")
 
 
@@ -110,12 +97,11 @@ def find_names(text: str, src: str, extra: frozenset[str] = frozenset()) -> list
         spans += [m.span(2) for m in postcodes(text)]
         spans += [m.span() for m in STREET.finditer(text)]
     if extra:
-        # The same name elsewhere on the screen, also when the OCR read one of them a little
-        # differently ("3999 Muster,vil" in the header, "Gemeindeverwaltung Musterwil" below).
+        # The same name elsewhere on the screen ("3999 Musterwil" in the header,
+        # "Gemeindeverwaltung Musterwil" below).
         keys = {_letters(n) for n in extra}
         for m in _CAP_WORD.finditer(text):
-            w = _letters(m.group(0))
-            if any(_close(w, k) for k in keys):
+            if _letters(m.group(0)) in keys:
                 spans.append(m.span())
     return spans
 
@@ -138,14 +124,13 @@ class Protected:
     spans: list[tuple[int, int, str]]  # (start, end, kind) kind: "link" | "name" | "number"
     markers: dict[str, str] = field(default_factory=dict)
 
-    def masked(self, level: int, rewrite=lambda s: s) -> str:
-        """Text for the model. Level 0 masks links, 1 also names, 2 also numbers. `rewrite`
-        is applied to the plain text between the spans (for example Swiss spelling)."""
+    def masked(self, level: int) -> str:
+        """Text for the model. Level 0 masks links, 1 also names, 2 also numbers."""
         kinds = {"link"} | ({"name"} if level >= 1 else set()) | ({"number"} if level >= 2 else set())
         self.markers = {}
         out, pos = [], 0
         for a, b, kind in self.spans:
-            out.append(rewrite(self.text[pos:a]))
+            out.append(self.text[pos:a])
             if kind in kinds:
                 key = f"QX{len(self.markers) + 1}"
                 self.markers[key] = self.text[a:b]
@@ -153,7 +138,7 @@ class Protected:
             else:
                 out.append(self.text[a:b])
             pos = b
-        out.append(rewrite(self.text[pos:]))
+        out.append(self.text[pos:])
         return "".join(out)
 
     def restore(self, translated: str) -> str | None:

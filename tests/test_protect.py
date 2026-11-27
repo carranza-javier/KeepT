@@ -5,7 +5,7 @@ import pytest
 
 from keept.translate import protect
 from keept.translate.models import ModelStore
-from keept.translate.translator import Translator, fix_ocr_letters
+from keept.translate.translator import Translator
 
 
 def spans(text, src="de", names=frozenset()):
@@ -107,17 +107,12 @@ def test_sentence_stays_original_when_numbers_cannot_be_kept():
 
 def test_language_name_labels_use_the_table():
     tr = make(MangleModel())
-    assert tr.translate(["DEUTSCH", "FRANCAIS", "Italiano", "ENGLISH"], "de", "es")[0] == "ALEMÁN"
-    assert tr.translate(["FRANCAIS"], "fr", "es") == ["FRANCÉS"]
-    assert tr.translate(["FRANGAIS"], "fr", "es") == ["FRANCÉS"]  # Ç misread by the OCR
+    assert tr.translate(["DEUTSCH", "FRANÇAIS", "Italiano", "ENGLISH"], "de", "es") == \
+        ["ALEMÁN", "FRANCÉS", "Italiano", "INGLÉS"]
+    assert tr.translate(["FRANÇAIS"], "fr", "es") == ["FRANCÉS"]
+    assert tr.translate(["Français:"], "it", "es") == ["Francés"]  # whatever language it was detected as
     assert tr.translate(["ENGLISH"], "en", "es") == ["INGLÉS"]
-
-
-def test_impossible_ocr_letters():
-    assert fix_ocr_letters("Ä partir du 1er décembre, au plus tard ä 7 h.", "fr") == \
-        "À partir du 1er décembre, au plus tard à 7 h."
-    assert fix_ocr_letters("la raccolta puÖ essere, la cittä.", "it") == "la raccolta può essere, la città."
-    assert fix_ocr_letters("Ä und ä", "de") == "Ä und ä"
+    assert tr.translate(["FRANGAIS"], "fr", "es") != ["FRANCÉS"]  # no guessing at misread names
 
 
 @pytest.mark.parametrize("text", ["Hallo Welt.", "Keine Zahlen hier"])
@@ -127,8 +122,16 @@ def test_text_without_protected_data_is_translated_once(text):
     assert len(model.calls) == 1
 
 
-def test_screen_name_survives_ocr_noise():
-    # The 9 pt header line read as "3999 Muster,vil" still protects "Musterwil" below it.
-    names = protect.screen_names(["Dorfstrasse 1 3999 Muster,vil"])
+def test_screen_name_matches_whole_words_only():
+    names = protect.screen_names(["Dorfstrasse 1 • 3999 Musterwil"])
     assert ("Musterwil", "name") in spans("Gemeindeverwaltung Musterwil", names=names)
     assert not any(k == "name" for _, k in spans("Die Muster sind da", names=names))
+    assert not any(k == "name" for _, k in spans("Gemeindeverwaltung Mustervil", names=names))
+
+
+def test_a_repeated_number_is_caught():
+    # "from 8.00 to 11.30" must never come out as "de 8.00 a 11 11.30".
+    p = protect.protect("The office is open from 8.00 to 11.30.", "en")
+    assert p.check("La oficina abre de 8.00 a 11.30.")
+    assert not p.check("La oficina abre de 8.00 a 11 11.30.")
+    assert not p.check("La oficina abre de 8.00 a 11.")

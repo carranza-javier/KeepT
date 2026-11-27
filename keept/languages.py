@@ -66,17 +66,18 @@ def _plain(text: str) -> str:
 
 
 def language_name_label(text: str, src: str, tgt: str) -> str | None:
-    """The label in `tgt` when `text` is just the name of a language written in `src`
-    (accents may be missing, as OCR often drops them: "FRANCAIS")."""
-    names = NAMES_IN.get(src)
-    if not names or tgt not in NAMES_IN:
+    """The label in `tgt` when `text` is just the name of a language. The name is looked up in
+    `src` first, then in every other language: a short label such as "FRANÇAIS" on a letter
+    in several languages may have been detected as any of them."""
+    if tgt not in NAMES_IN:
         return None
     key = _plain(text)
-    for code, name in names.items():
-        plain = _plain(name)
-        # One character may be misread by the OCR in longer names ("FRANGAIS").
-        if plain == key or (len(plain) >= 6 and len(key) == len(plain)
-                            and sum(a != b for a, b in zip(plain, key)) == 1):
+    if not key:
+        return None
+    for lang in [src, *(l for l in NAMES_IN if l != src)]:
+        for code, name in NAMES_IN.get(lang, {}).items():
+            if _plain(name) != key:
+                continue
             out = NAMES_IN[tgt][code]
             letters = [c for c in text if c.isalpha()]
             if letters and all(c.isupper() for c in letters):

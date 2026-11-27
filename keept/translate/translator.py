@@ -11,7 +11,7 @@ import time
 from typing import Callable, Protocol
 
 from ..languages import language_name_label
-from . import protect, swiss
+from . import protect
 from .models import KNOWN_PAIRS, LoadedModel, ModelStore, Progress
 
 log = logging.getLogger(__name__)
@@ -42,25 +42,6 @@ def split_sentences(text: str) -> list[str]:
         start = m.end()
     parts.append(text[start:])
     return [p for p in parts if p.strip()]
-
-
-_FR_A = re.compile(r"(?<!\S)[äåÄÅ](?!\S)")
-_IT_FINAL = re.compile(r"(?<=\w)[öäÖÄ](?=$|[\s.,;:!?)])")
-
-
-def fix_ocr_letters(text: str, lang: str) -> str:
-    """Letters the OCR confuses that cannot exist in the language: French "à" read as "ä" or
-    "å" ("Ä partir"), Italian final "ò"/"à" read as "ö"/"ä" ("puö", "cittä")."""
-    if lang == "fr":
-        return _FR_A.sub(lambda m: "À" if m.group(0).isupper() else "à", text)
-    if lang == "it":
-        def grave(m: re.Match) -> str:
-            c = {"ö": "ò", "ä": "à", "Ö": "Ò", "Ä": "À"}[m.group(0)]
-            before = text[m.start() - 1]
-            return c.lower() if before.islower() else c  # "puÖ" -> "può"
-
-        return _IT_FINAL.sub(grave, text)
-    return text
 
 
 def route(src: str, tgt: str, pairs=KNOWN_PAIRS) -> list[tuple[str, str]]:
@@ -163,7 +144,7 @@ class Translator:
             spans: list[tuple[int, int]] = []
             sentences: list[str] = []
             for i in todo:
-                parts = split_sentences(fix_ocr_letters(texts[i], src))
+                parts = split_sentences(texts[i])
                 spans.append((len(sentences), len(sentences) + len(parts)))
                 sentences.extend(parts)
             done = self._translate_sentences(sentences, src, tgt, progress, names)
@@ -180,12 +161,11 @@ class Translator:
         or names do not survive is translated again with markers for them; if it still fails,
         it stays in the original language (a wrong date or amount is worse than none)."""
         items = [protect.protect(s, src, names) for s in sentences]
-        rewrite = self._rewrite_for(src, tgt, progress)
         results: list[str | None] = [language_name_label(s, src, tgt) for s in sentences]
         level = [0] * len(items)
         pending = [i for i, r in enumerate(results) if r is None]
         while pending:
-            masked = [items[i].masked(level[i], rewrite) for i in pending]
+            masked = [items[i].masked(level[i]) for i in pending]
             translated = self._run_route(masked, src, tgt, progress)
             retry = []
             for i, text in zip(pending, translated):
@@ -204,14 +184,6 @@ class Translator:
                     results[i] = item.text
             pending = retry
         return [r or "" for r in results]
-
-    def _rewrite_for(self, src: str, tgt: str, progress: Progress | None):
-        if src != "de":
-            return lambda s: s
-        first = self.model(route(src, tgt)[0], progress)
-        tok = getattr(first, "tokenizer", None)
-        pieces = (lambda w: len(tok.encode(w))) if tok is not None else None
-        return lambda s: swiss.normalize(s, pieces)
 
     def _run_route(self, texts: list[str], src: str, tgt: str, progress: Progress | None) -> list[str]:
         current = texts
