@@ -140,6 +140,8 @@ def main() -> int:
     ap.add_argument("--warm", help="source languages: warm up OCR and load their models first, as the app does")
     ap.add_argument("--pick", default="", help="text a block starts with, for the click and rect timings")
     ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--warm-cache", action="store_true",
+                    help="keep OCR and translation caches between runs (the same screen opened again)")
     ap.add_argument("--frames", action="store_true", help="page: save frames while the blocks appear")
     ap.add_argument("--wait", type=float, default=0.3,
                     help="page: seconds between the end of the OCR and Enter (-1: Enter right after the hotkey)")
@@ -236,6 +238,16 @@ def main() -> int:
     return 0
 
 
+def clear_caches(d: "Driver", args) -> None:
+    """Every run starts from scratch, unless --warm-cache (the same screen opened again)."""
+    if getattr(args, "warm_cache", False):
+        return
+    from keept.ocr.recognizer import clear_cache
+
+    d.engine.translator.clear_cache()
+    clear_cache()
+
+
 def timing(d: "Driver", args) -> int:
     """Time from the request to the first translated block on screen, for a click on a block (the
     pointer rests on it 250 ms before), a rectangle drawn around it in 300 ms and Enter pressed
@@ -251,7 +263,7 @@ def timing(d: "Driver", args) -> int:
 
     for run in range(args.runs):
         for kind in ("click", "rect", "enter_now"):
-            d.engine.translator.clear_cache()
+            clear_caches(d, args)
             t_hotkey = time.perf_counter()
             d.ov.open(d.capture, t_hotkey)
             if kind == "enter_now":
@@ -299,7 +311,7 @@ def page(d: "Driver", args) -> int:
     """"Translate screen" (Enter) on the whole page once its OCR is done: time to the first
     translated block and to the last one, and the order in which the languages appear."""
     for run in range(args.runs):
-        d.engine.translator.clear_cache()
+        clear_caches(d, args)
         d.ov.open(d.capture, time.perf_counter())
         if args.wait < 0:
             d.pump(30)  # Enter right after the hotkey, before the OCR is done
@@ -326,6 +338,12 @@ def page(d: "Driver", args) -> int:
                 break
             time.sleep(0.002)
         total = time.perf_counter() - t0
+        import builtins  # timeline of reads and translations, filled by an instrumenting wrapper
+
+        for a, b, *rest in sorted(getattr(builtins, "KEEPT_EV", [])):
+            if b >= t0:
+                print(f"   {(a - t0) * 1000:6.0f} {(b - t0) * 1000:6.0f}", *rest)
+        getattr(builtins, "KEEPT_EV", []).clear()
         # The page is fully visible when the last block has been uncovered.
         from keept.overlay.overlay_window import REVEAL_MS
 

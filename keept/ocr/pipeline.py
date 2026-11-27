@@ -91,7 +91,7 @@ def reread_block(block: Block, bgra: np.ndarray, rec, stop=None) -> bool:
     for line in block.lines[len(confs):]:
         if confs and stop is not None and stop():
             return False
-        reading = rec.read(bgra, [line.rect])[0]
+        reading = rec.read(bgra, [line.rect], [line_height(line)])[0]
         text, xs = _tidy(reading.text, reading.char_x, line.inline)
         confs.append(reading.confidence)
         weights.append(max(1, len(text)))
@@ -100,6 +100,29 @@ def reread_block(block: Block, bgra: np.ndarray, rec, stop=None) -> bool:
     del block.meta["_read"]
     block.meta["confidence"] = sum(c * w for c, w in zip(confs, weights)) / sum(weights) if weights else 0.0
     return True
+
+
+def line_height(line: Line) -> int:
+    """Input height for the line recognizer: full for lines with digits (see TEXT_HEIGHT)."""
+    from .recognizer import HEIGHT, TEXT_HEIGHT
+
+    return HEIGHT if any(c.isdigit() for c in line.text) else TEXT_HEIGHT
+
+
+def reread_line(block: Block, index: int, bgra: np.ndarray, rec) -> tuple[float, int]:
+    """Read one line of a block again. Returns its confidence and weight (characters) for
+    block_confidence. Lines of one block may be read by different threads at once."""
+    line = block.lines[index]
+    reading = rec.read(bgra, [line.rect], [line_height(line)])[0]
+    text, xs = _tidy(reading.text, reading.char_x, line.inline)
+    if text:
+        line.words = _words_from(text, xs, line)
+    return reading.confidence, max(1, len(text))
+
+
+def block_confidence(results: list[tuple[float, int]]) -> float:
+    weights = sum(w for _, w in results)
+    return sum(c * w for c, w in results) / weights if weights else 0.0
 
 
 def low_confidence(block: Block) -> bool:

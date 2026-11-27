@@ -11,9 +11,11 @@ It runs on onnxruntime with plain numpy pre and post processing (no OpenCV).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,7 +26,11 @@ from .layout import Rect
 log = logging.getLogger(__name__)
 
 MODEL = Path(__file__).with_name("latin_PP-OCRv5_rec_mobile.onnx")
-HEIGHT = 48  # input height of the model
+HEIGHT = 48  # input height the model was trained with
+# Lines without digits are read at this height: as exact on the research test set (no word
+# lost, two gained) and 14 % less work. Digits keep the full height: at 40 px a date of small
+# grey text lost a digit ("26.1.2026").
+TEXT_HEIGHT = 40
 MIN_RATIO = 320 / 48  # the model was trained on inputs at least this wide
 BATCH = 1  # measured: padding lines of a batch to the widest one costs more than it saves
 
@@ -72,8 +78,10 @@ class LineRecognizer:
         # CTC: index 0 is the blank, the space comes last.
         self._chars = ["", *chars, " "]
 
-    def read(self, bgra: np.ndarray, rects: list[Rect]) -> list[Reading]:
-        """Read the text of every rectangle (a line found by Windows OCR) of the image."""
+    def read(self, bgra: np.ndarray, rects: list[Rect], heights: list[int] | None = None) -> list[Reading]:
+        """Read the text of every rectangle (a line found by Windows OCR) of the image, each
+        scaled to its height in `heights` (default HEIGHT)."""
+        heights = heights or [HEIGHT] * len(rects)
         h, w = bgra.shape[:2]
         crops: list[tuple[np.ndarray, float]] = []
         for r in rects:
@@ -82,25 +90,34 @@ class LineRecognizer:
             x1, y1 = min(w, int(math.ceil(r.right)) + pad), min(h, int(math.ceil(r.bottom)) + pad)
             crops.append((bgra[y0:y1, x0:x1], float(x0)))
         out: list[Reading | None] = [None] * len(crops)
-        order = sorted(range(len(crops)), key=lambda i: crops[i][0].shape[1] / max(1, crops[i][0].shape[0]))
+        keys = [_key(c, h) for (c, _), h in zip(crops, heights)]
+        for i, k in enumerate(keys):
+            hit = _cache_get(k)
+            if hit is not None:
+                out[i] = Reading(hit.text, hit.confidence, [x + crops[i][1] for x in hit.char_x])
+        todo = [i for i in range(len(crops)) if out[i] is None]
+        order = sorted(todo, key=lambda i: (heights[i], crops[i][0].shape[1] / max(1, crops[i][0].shape[0])))
         for start in range(0, len(order), BATCH):
             ids = [i for i in order[start:start + BATCH] if crops[i][0].size]
+            ids = [i for i in ids if heights[i] == heights[ids[0]]] if ids else ids
             for i in order[start:start + BATCH]:
                 if not crops[i][0].size:
                     out[i] = Reading("", 0.0, [])
             if ids:
-                for i, reading in zip(ids, self._run([crops[i] for i in ids])):
+                for i, reading in zip(ids, self._run([crops[i] for i in ids], heights[ids[0]])):
                     out[i] = reading
+                    _cache_put(keys[i], Reading(reading.text, reading.confidence,
+                                                [x - crops[i][1] for x in reading.char_x]))
         return [r or Reading("", 0.0, []) for r in out]
 
-    def _run(self, crops: list[tuple[np.ndarray, float]]) -> list[Reading]:
+    def _run(self, crops: list[tuple[np.ndarray, float]], height: int = HEIGHT) -> list[Reading]:
         ratios = [c.shape[1] / c.shape[0] for c, _ in crops]
-        width = int(HEIGHT * max(MIN_RATIO, *ratios))
-        batch = np.zeros((len(crops), 3, HEIGHT, width), np.float32)
+        width = int(height * max(MIN_RATIO, *ratios))
+        batch = np.zeros((len(crops), 3, height, width), np.float32)
         scales = []
         for k, (crop, _) in enumerate(crops):
-            rw = min(width, int(math.ceil(HEIGHT * ratios[k])))
-            img = _resize(crop, HEIGHT, rw) / 255.0
+            rw = min(width, int(math.ceil(height * ratios[k])))
+            img = _resize(crop, height, rw) / 255.0
             batch[k, :, :, :rw] = (img.transpose(2, 0, 1) - 0.5) / 0.5
             scales.append(crop.shape[1] / rw)
         preds = self._session.run(None, {self._input: batch})[0]  # (N, T, classes)
@@ -119,6 +136,45 @@ class LineRecognizer:
                 prev = c
             out.append(Reading("".join(text), float(np.mean(confs)) if confs else 0.0, xs))
         return out
+
+
+# Readings of line images seen before (same pixels): opening KeepT again on the same page, or
+# after scrolling, does not read those lines again. Positions are kept relative to the crop.
+CACHE_LINES = 4000
+_cache: OrderedDict[bytes, Reading] = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def _key(crop: np.ndarray, height: int) -> bytes | None:
+    if not crop.size:
+        return None
+    h = hashlib.blake2b(np.ascontiguousarray(crop).data, digest_size=16)
+    h.update(np.asarray((*crop.shape, height), np.int32).tobytes())
+    return h.digest()
+
+
+def _cache_get(key: bytes | None) -> Reading | None:
+    if key is None:
+        return None
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is not None:
+            _cache.move_to_end(key)
+        return hit
+
+
+def _cache_put(key: bytes | None, reading: Reading) -> None:
+    if key is None:
+        return
+    with _cache_lock:
+        _cache[key] = reading
+        while len(_cache) > CACHE_LINES:
+            _cache.popitem(last=False)
+
+
+def clear_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
 
 
 _rec: LineRecognizer | None = None

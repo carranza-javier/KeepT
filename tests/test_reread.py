@@ -40,7 +40,7 @@ class FakeRecognizer:
         self.readings = list(readings)
         self.calls = 0
 
-    def read(self, bgra, rects):
+    def read(self, bgra, rects, heights=None):
         out = [Reading(t, c, [float(i) for i in range(len(t))]) for t, c in self.readings[:len(rects)]]
         del self.readings[:len(rects)]
         self.calls += 1
@@ -96,3 +96,38 @@ def test_reread_stops_between_lines_and_goes_on_later():
     assert reread_block(block, bgra, rec) is True
     assert block.text == "lunedì. Si può"
     assert block.meta["confidence"] > 0.9
+
+
+def test_lines_with_digits_are_read_at_full_height():
+    from keept.ocr.pipeline import line_height
+    from keept.ocr.recognizer import HEIGHT, TEXT_HEIGHT
+
+    assert line_height(line(("Zuletzt", 0, 60), ("26.11.2026,", 65, 80))) == HEIGHT
+    assert line_height(line(("Freundliche", 0, 60), ("Grüsse", 65, 50))) == TEXT_HEIGHT
+
+
+def test_the_same_line_image_is_read_once():
+    from keept.ocr import recognizer as R
+    from keept.ocr.layout import Rect
+
+    class Counting(R.LineRecognizer):
+        def __init__(self):
+            self.runs = 0
+
+        def _run(self, crops, height=R.HEIGHT):
+            self.runs += 1
+            return [R.Reading("Hallo", 0.9, [1.0, 2.0, 3.0, 4.0, 5.0]) for _ in crops]
+
+    R.clear_cache()
+    rec = Counting()
+    img = np.zeros((40, 200, 4), np.uint8)
+    img[12:20, 20:60] = 255
+    first = rec.read(img, [Rect(18, 10, 50, 12)])[0]
+    moved = np.zeros((40, 300, 4), np.uint8)
+    moved[12:20, 120:160] = 255  # same pixels further right
+    again = rec.read(moved, [Rect(118, 10, 50, 12)])[0]
+    assert rec.runs == 1 and again.text == "Hallo"
+    assert again.char_x[0] - first.char_x[0] == 100  # positions follow the line
+    rec.read(img, [Rect(18, 10, 50, 12)], [R.TEXT_HEIGHT])
+    assert rec.runs == 2  # another input height is another reading
+    R.clear_cache()

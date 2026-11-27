@@ -13,7 +13,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from .ocr import backend as ocr_backend
-from .ocr.pipeline import first_pass, reread_block
+from .ocr.pipeline import block_confidence, first_pass, reread_line
 from .translate.models import ModelError
 from .translate.translator import Translator, route
 
@@ -122,74 +122,79 @@ class Engine(QObject):
                 self._reread_cond.notify_all()
 
     def _reread(self, session: int, blocks, bgra: np.ndarray) -> None:
-        """Second reading of every block until done or a new session. The OCR thread reads
-        the screen in reading order; the blocks the user asks for go first, and a few
-        more threads read them too, one block each (the recognizer is thread safe), so they
-        reach translation sooner."""
+        """Second reading of every line until done or a new session, one line at a time so the
+        user never waits for more than one line nobody asked for. The OCR thread reads the
+        screen in reading order; lines of blocks the user asks for go first, and a few more
+        threads read them too (the recognizer is thread safe): the lines of one paragraph at
+        the same time, and with several blocks asked for (Enter) the longest first, since
+        its translation takes longest too."""
         from .ocr.recognizer import recognizer
 
         t0 = time.perf_counter()
         rec = recognizer()
         by_id = {b.id: b for b in blocks}
         rest = [b.id for b in blocks]
-        taken: set[int] = set()
+        todo = {b.id: list(range(len(b.lines))) for b in blocks}  # lines nobody took yet
+        left = {b.id: len(b.lines) for b in blocks}  # lines not read yet
+        results: dict[int, list] = {b.id: [None] * len(b.lines) for b in blocks}
+        taken: set[int] = {b.id for b in blocks if not b.lines}  # blocks with every line taken
         with self._reread_cond:
             self._taken = taken
-        asked: set[int] = set()
         done: list[int] = []
 
-        def take(helper: bool) -> int | None:
+        def remaining(bid: int) -> float:
+            return sum(by_id[bid].lines[i].rect.w for i in todo[bid])
+
+        def pop(bid: int) -> int:
+            i = todo[bid].pop(0)
+            if not todo[bid]:
+                taken.add(bid)
+            return i
+
+        def take(helper: bool) -> tuple[int, int, bool] | None:
             with self._reread_cond:
                 while self._alive(session) and len(taken) < len(by_id):
-                    urgent = [i for i in self._urgent if i not in taken and i in by_id]
+                    urgent = [i for i in self._urgent if todo.get(i)]
                     self._urgent = urgent
-                    # Helpers only read blocks the user asked for, and only when there are
-                    # several: one block (a click) is read faster alone than next to another.
-                    if urgent and (not helper or len(urgent) >= 2):
-                        taken.add(urgent[0])
-                        asked.add(urgent[0])
+                    # Helpers join only when there is more than one line to read for the user.
+                    if urgent and (not helper or sum(len(todo[i]) for i in urgent) >= 2):
+                        bid = max(urgent, key=remaining) if helper and len(urgent) >= 2 else urgent[0]
                         self._urgent_reading += 1
-                        return urgent[0]
+                        return bid, pop(bid), True
                     if helper or self._translating:
-                        # Blocks nobody asked for yet wait while a translation runs: both need
+                        # Lines nobody asked for yet wait while a translation runs: both need
                         # the CPU, and the translation is what the user is waiting for.
                         self._reread_cond.wait(0.1)
                         continue
-                    nxt = next(i for i in rest if i not in taken)
-                    taken.add(nxt)
-                    return nxt
+                    bid = next(i for i in rest if todo[i])
+                    return bid, pop(bid), False
                 return None
-
-        def yield_to_user() -> bool:
-            # A block nobody asked for stops between two lines when the user waits for
-            # something: a block to read or a translation (on a two core PC a paragraph takes
-            # half a second to read, too long to finish first).
-            with self._reread_cond:
-                return bool(self._translating or any(i not in taken for i in self._urgent))
 
         def work(helper: bool = False) -> None:
             reader = recognizer(single_thread=True) if helper else rec
-            while (nxt := take(helper)) is not None:
+            while (item := take(helper)) is not None:
+                bid, index, asked = item
                 try:
-                    finished = reread_block(by_id[nxt], bgra, reader,
-                                            None if nxt in asked else yield_to_user)
-                except Exception:  # noqa: BLE001 - keep the Windows OCR reading of this block
-                    log.exception("Second reading of block %d failed", nxt)
-                    by_id[nxt].meta.pop("_read", None)
-                    by_id[nxt].meta["confidence"] = 1.0
-                    finished = True
-                if not finished:
-                    with self._reread_cond:
-                        taken.discard(nxt)  # taken again later, from the line it stopped at
-                    continue
-                done.append(nxt)
-                if nxt in asked:
-                    with self._reread_cond:
+                    res = reread_line(by_id[bid], index, bgra, reader)
+                except Exception:  # noqa: BLE001 - keep the Windows OCR reading of this line
+                    log.exception("Second reading of a line of block %d failed", bid)
+                    res = (1.0, 1)
+                with self._reread_cond:
+                    results[bid][index] = res
+                    left[bid] -= 1
+                    finished = left[bid] == 0
+                    if asked:
                         self._urgent_reading -= 1
                         self._reread_cond.notify_all()
-                if self._alive(session):
-                    self.blocks_read.emit(session, [nxt])
+                if finished:
+                    by_id[bid].meta["confidence"] = block_confidence(results[bid])
+                    done.append(bid)
+                    if self._alive(session):
+                        self.blocks_read.emit(session, [bid])
 
+        for b in blocks:
+            if not b.lines:
+                b.meta["confidence"] = 0.0
         with self._reread_cond:
             self._reading = True
         try:
