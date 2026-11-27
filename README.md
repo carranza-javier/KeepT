@@ -11,7 +11,7 @@ Made by Javier Carranza · [KettenKI](https://kettenki.com)
 **[Download KeepT for Windows](https://github.com/carranza-javier/KeepT/releases)**: take `KeepT-Setup-x.y.z.exe` from the newest release (about 50 MB, Windows 10 or 11, 64-bit). KeepT is not stable yet, so 0.x versions are published as pre-releases.
 
 - The installer works per user, so no administrator rights are needed, and it can start KeepT with Windows.
-- Every release lists the SHA-256 of the installer. To check it in PowerShell, run `Get-FileHash .\KeepT-Setup-0.9.3.exe -Algorithm SHA256`.
+- Every release lists the SHA-256 of the installer. To check it in PowerShell, run `Get-FileHash .\KeepT-Setup-0.10.0.exe -Algorithm SHA256`.
 - **Windows SmartScreen:** the installer is not signed yet (see [Code signing policy](#code-signing-policy)), so Windows may show "Windows protected your PC". Click **More info** and then **Run anyway**. The installer is built by GitHub Actions from this repository, and you can compare its SHA-256 with the one in the release.
 - To uninstall, use Settings > Apps. Downloaded models and settings are removed too.
 
@@ -43,9 +43,9 @@ The app and the installer are also available in these eight languages. They foll
 
 No model ships inside the installer. Each one (about 80 to 250 MB) is downloaded once: during installation for the languages you choose, from the tray "Languages" window, or the first time you translate text in another language, with the progress shown in the pill. Models are kept in `%LOCALAPPDATA%\KeepT\models` and can be deleted from the tray. After 10 minutes without use KeepT frees them from memory, and it reloads them in the background as soon as you press the shortcut.
 
-E-mail addresses and links are never translated. Numbers, dates, times, amounts and Swiss place names (the official list of municipalities, and the word after a Swiss postal code such as "3999 Musterwil") come out exactly as they are on the screen: if the translation of a sentence changes one of them, the sentence is translated again with these parts protected, and if that still fails it stays in the original language rather than show a wrong date or amount. German written in Switzerland ("Strasse", "Grüsse", "Kehricht", "Velo", "parkieren") is rewritten to the spelling and words the models know before it is translated.
+E-mail addresses and links are never translated. Numbers, dates, times, amounts and Swiss place names (the official list of municipalities, and the word after a Swiss postal code such as "3999 Musterwil") come out exactly as they are on the screen: if the translation of a sentence changes one of them, the sentence is translated again with these parts protected, and if that still fails it stays in the original language rather than show a wrong date or amount.
 
-Text recognition uses the OCR built into Windows. If the OCR pack for a language is missing, KeepT tells you how to add it (Settings > Time & language > Language).
+Text recognition works in two steps. The OCR built into Windows finds the lines and blocks of text at once, then a small open recognizer (PP-OCRv5 latin from PaddleOCR, 7.9 MB, runs on the CPU) reads every line again: it gets the periods, accents, umlauts and symbols that the Windows OCR misreads in small or grey text. The blocks you point at or select are read first, the rest of the screen follows in the background. A block whose reading is unsure (an icon, a decorative font) is left as it is. If the OCR pack for a language is missing, KeepT tells you how to add it (Settings > Time & language > Language).
 
 ## Privacy
 
@@ -85,8 +85,8 @@ These tools work without touching the real mouse or keyboard:
 - `tools/make_test_screen.py` renders a synthetic screen with known German, English and Spanish text.
 - `tools/drive_overlay.py IMAGE` drives the real overlay with synthetic input and saves frames.
 - `tools/ocr_dump.py IMAGE` prints the text blocks and languages KeepT detects.
-- `tools/render_letter.py OUT.png [ZOOM]` renders the multilingual sample letter in `docs/` (used by `tests/test_letter.py`), and `tools/bench/swiss_german.py` measures the Swiss German rewriting.
-- KeepT's own windows are excluded from screen capture, so it can never read its own overlay. Set `KEEPT_CAPTURABLE=1` to take screenshots of them with other tools.
+- `tools/render_letter.py OUT.png [ZOOM]` renders the multilingual sample letter in `docs/` (used by `tests/test_letter.py`).
+- The overlay is kept out of screen captures only while it is closed, so KeepT never reads its own translation, while screenshots of an open overlay (Win+Shift+S) show it.
 - `python -m keept --selftest IMAGE|screen --target es` runs OCR and translation once and reports timings; it also works with the packaged `KeepT.exe`.
 - `python -m keept --fake-capture IMAGE --debug-blocks` uses an image instead of the screen and outlines the OCR blocks.
 - `tools/record_demo.py` and `tools/make_gif.py` record the README animation from the synthetic screen.
@@ -113,18 +113,22 @@ keept/
   updates.py        daily check for a newer GitHub release
   platform/         Windows specifics (hotkey, DPI, DWM cloaking, autostart) behind an interface
   capture.py        monitor capture with mss
-  ocr/              Windows.Media.Ocr wrapper, block grouping, per block language re-read
+  ocr/              Windows.Media.Ocr wrapper, block grouping, second reading with PP-OCRv5 latin
   translate/        language detection, OPUS-MT catalog, model store and translator with pivot
   overlay/          overlay window, effects, pill, selection, rendering helpers
 ```
 
 ## Credits and licenses
 
-KeepT downloads its translation models on first use, and none are bundled in the installer. The same credits are shown in the tray menu under "About KeepT", and the full license texts ship in the program's `licenses` folder (`packaging/licenses` in the source tree).
+KeepT downloads its translation models on first use, and none are bundled in the installer. The text line recognizer is bundled. The same credits are shown in the tray menu under "About KeepT", and the full license texts ship in the program's `licenses` folder (`packaging/licenses` in the source tree).
 
 ### Translation models
 
 **OPUS-MT** (Tatoeba-MT and OPUS-MT releases) is used for every language pair. It was created by Jörg Tiedemann, Santhosh Thottingal et al. at the Language Technology Research Group, University of Helsinki, and is described in "OPUS-MT: Building open translation services for the World" (EAMT 2020) and "The Tatoeba Translation Challenge" (WMT 2020). License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The models were modified: they are converted to CTranslate2 (int8) and published in the [models-v1 release](https://github.com/carranza-javier/KeepT/releases/tag/models-v1) together with the original LICENSE and README and a NOTICE describing the conversion. The model used for each pair is listed in `keept/translate/catalog.json` (built by `tools/build_model_catalog.py`).
+
+### Text recognition model
+
+**PP-OCRv5 latin text line recognizer** (`keept/ocr/latin_PP-OCRv5_rec_mobile.onnx`) by the PaddlePaddle Authors ([PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)), in the ONNX export published by [RapidOCR](https://github.com/RapidAI/RapidOCR). License: Apache-2.0. Unmodified.
 
 ### Data
 
@@ -135,6 +139,7 @@ The names of Swiss municipalities that KeepT keeps unchanged (`keept/translate/s
 | Component | License |
 | --- | --- |
 | Qt 6 / PySide6 (dynamically linked, replaceable DLLs) | LGPL-3.0 |
+| ONNX Runtime (Microsoft) | MIT |
 | CTranslate2 (SYSTRAN, OpenNMT) | MIT |
 | Intel oneMKL and OpenMP runtime, bundled with CTranslate2 | Intel Simplified Software License |
 | SentencePiece (Google) | Apache-2.0 |
@@ -143,7 +148,7 @@ The names of Swiss municipalities that KeepT keeps unchanged (`keept/translate/s
 | NumPy | BSD-3-Clause |
 | python-mss | MIT |
 | PyWinRT | MIT |
-| PyYAML, joblib, regex, click, tqdm | MIT, BSD-3-Clause, Apache-2.0, MPL-2.0 |
+| PyYAML, joblib, regex, click, tqdm, protobuf, flatbuffers | MIT, BSD-3-Clause, Apache-2.0, MPL-2.0 |
 | Python | PSF License |
 | PyInstaller bootloader | GPL-2.0 with bootloader exception |
 

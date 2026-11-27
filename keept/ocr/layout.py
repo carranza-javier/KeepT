@@ -5,6 +5,7 @@ All coordinates are physical pixels of the captured monitor image.
 
 from __future__ import annotations
 
+import itertools
 import re
 import statistics
 from dataclasses import dataclass, field
@@ -68,7 +69,7 @@ class Word:
 
 # Glyph classes (Segoe UI like proportions, in em): descenders go ~0.21 below the
 # baseline, ascenders and capitals reach ~0.74 above it, x-height is ~0.5.
-_DESCENDERS = set("gjpqyQ,;()[]{}|@ç")
+_DESCENDERS = set("gjpqyQ,;()[]{}|@çÇ")
 _ASCENDERS = set("bdfhklt0123456789?!/\'\"%&#()[]{}|ß") | set("áéíóúäöüñ")
 DESC_EM, ASC_EM, X_EM = 0.21, 0.74, 0.52
 
@@ -79,6 +80,9 @@ class Line:
     # Part of a line that was cut at a separator ("Grüsse • salutations • saluti"): such parts
     # are separate items and never join the lines above or below.
     inline: bool = False
+    # Parts of the same line share this number (0 = not a part): their translations are laid
+    # out together, at one size and on one baseline.
+    source: int = 0
 
     @property
     def rect(self) -> Rect:
@@ -137,6 +141,11 @@ class Block:
         return statistics.median(l.height for l in self.lines)
 
     @property
+    def inline_source(self) -> int:
+        """The line this one-line block is a part of (0 when it is not a part of a line)."""
+        return self.lines[0].source if len(self.lines) == 1 and self.lines[0].inline else 0
+
+    @property
     def font_px(self) -> float:
         """Estimated font pixel size (em) of the original text."""
         return statistics.median(l.metrics()[0] for l in self.lines)
@@ -172,6 +181,7 @@ def join_lines(lines: list[str]) -> str:
 
 
 SEPARATORS = {"•", "·", "|", "◦", "‧", "∙", "●", "▪"}
+_sources = itertools.count(1)
 
 
 def split_line_on_gaps(line: Line, gap_factor: float = 1.8) -> list[Line]:
@@ -203,7 +213,8 @@ def split_line_on_gaps(line: Line, gap_factor: float = 1.8) -> list[Line]:
             if gap > gap_factor * h:
                 cut(False)
         parts[-1].append(w)
-    return [Line(p, inline=bool(f)) for p, f in zip(parts, inline) if p]
+    source = next(_sources) if any(inline) else 0
+    return [Line(p, inline=bool(f), source=source if f else 0) for p, f in zip(parts, inline) if p]
 
 
 _SENTENCE_END = re.compile(r"[.!?…:]\W*$")

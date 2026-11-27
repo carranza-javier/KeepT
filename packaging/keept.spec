@@ -19,6 +19,7 @@ datas = collect_data_files("sacremoses") + collect_data_files("ctranslate2") + c
 datas += [(str(ROOT / "keept" / "translate" / "catalog.json"), "keept/translate")]
 datas += [(str(ROOT / "keept" / "translate" / "models_manifest.json"), "keept/translate")]
 datas += [(str(ROOT / "keept" / "translate" / "swiss_places.txt"), "keept/translate")]
+datas += [(str(ROOT / "keept" / "ocr" / "latin_PP-OCRv5_rec_mobile.onnx"), "keept/ocr")]
 # License texts: our collected copies plus the ones shipped by the bundled packages.
 datas += [(str(p), "licenses") for p in (ROOT / "packaging" / "licenses").glob("*.txt")]
 import glob  # noqa: E402
@@ -32,7 +33,10 @@ for pattern, prefix in (("sacremoses-*.dist-info/licenses/LICENSE", "sacremoses"
                         ("joblib-*.dist-info/licenses/LICENSE.txt", "joblib"),
                         ("regex-*.dist-info/licenses/LICENSE.txt", "regex"),
                         ("click-*.dist-info/licenses/LICENSE.txt", "click"),
-                        ("tqdm-*.dist-info/licenses/LICENCE", "tqdm")):
+                        ("tqdm-*.dist-info/licenses/LICENCE", "tqdm"),
+                        ("onnxruntime/LICENSE", "onnxruntime"),
+                        ("onnxruntime/ThirdPartyNotices.txt", "onnxruntime"),
+                        ("protobuf-*.dist-info/LICENSE", "protobuf")):
     import sysconfig  # noqa: E402
 
     for f in glob.glob(str(Path(sysconfig.get_paths()["purelib"]) / pattern)):
@@ -41,6 +45,8 @@ binaries = collect_dynamic_libs("ctranslate2")
 
 excludes = [
     "tkinter", "unittest", "pytest", "lib2to3", "IPython",
+    "onnxruntime.tools", "onnxruntime.transformers", "onnxruntime.quantization", "onnxruntime.datasets",
+    "onnxruntime.backend",
     "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtPdf", "PySide6.QtWebEngineCore",
     "PySide6.QtOpenGL", "PySide6.QtSvg", "PySide6.QtDBus", "PySide6.QtSql", "PySide6.QtTest",
     "PySide6.QtMultimedia", "PySide6.QtQuickWidgets", "PySide6.QtDesigner", "PySide6.QtUiTools",

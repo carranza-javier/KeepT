@@ -27,7 +27,7 @@ from keept.platform import MonitorInfo  # noqa: E402
 class StubEngine(QObject):
     ocr_finished = Signal(int, object)
     ocr_failed = Signal(int, str)
-    ocr_refined = Signal(int, object)
+    blocks_read = Signal(int, object)
     progress = Signal(int, str, float)
     translated = Signal(int, int, str)
     translation_finished = Signal(int, float)
@@ -42,6 +42,10 @@ class StubEngine(QObject):
 
     def start_ocr(self, *a):
         pass
+
+    def prioritize(self, session, ids):
+        # The second OCR reading of the asked blocks is "done" at once.
+        self.blocks_read.emit(session, list(ids))
 
     def translate(self, session, jobs, tgt, names=frozenset()):
         self.jobs.append((session, jobs, tgt))

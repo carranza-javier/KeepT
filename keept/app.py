@@ -253,6 +253,10 @@ class KeepTApp:
         ov.open(capture, t0)
 
     def _capture(self) -> Capture:
+        if time.perf_counter() - self._OverlayWindow.last_closed < 0.5:
+            # An overlay was just closed: let DWM compose a frame without it before capturing.
+            services().wait_for_composition()
+            services().wait_for_composition()
         if self.fake_capture is not None:
             m = services().monitor_at_cursor()
             h, w = self.fake_capture.shape[:2]
@@ -422,7 +426,7 @@ def selftest(image: str, target: str | None, out: str | None) -> int:
     from PySide6.QtGui import QGuiApplication
 
     from .ocr import backend
-    from .ocr.pipeline import read_screen
+    from .ocr.pipeline import low_confidence, read_screen
     from .translate.translator import Translator
 
     app = QGuiApplication(sys.argv[:1])  # noqa: F841 - QImage needs it
@@ -442,9 +446,15 @@ def selftest(image: str, target: str | None, out: str | None) -> int:
         report["model_load_ms"] = round((time.perf_counter() - t1) * 1000)
         t2 = time.perf_counter()
         results = []
+        from .translate import protect
+
+        names = protect.screen_names(b.text for b in text.blocks)  # as the overlay does
+        report["low_confidence_blocks"] = sum(1 for b in blocks if low_confidence(b))
         for b in blocks:
+            if low_confidence(b):
+                continue
             tb = time.perf_counter()
-            out_text = tr.translate([b.text], b.lang, tgt)[0]
+            out_text = tr.translate([b.text], b.lang, tgt, names=names)[0]
             results.append({"src": b.lang, "text": b.text, "translation": out_text,
                             "ms": round((time.perf_counter() - tb) * 1000)})
         report["translate_ms_total"] = round((time.perf_counter() - t2) * 1000)

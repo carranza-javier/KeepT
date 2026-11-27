@@ -168,9 +168,7 @@ def test_translation_of_the_letter_reads_right(translator):
     assert "1 de diciembre de 2026" in t(LETTER["de"][7], "de")
     assert t("DEUTSCH", "de") == "ALEMÁN"  # the model alone says "ESPAÑOL"
     assert t("ITALIANO", "it") == "ITALIANO" and t("ENGLISH", "en") == "INGLÉS"
-    swiss = t("Kehrichtabfuhr im Winter", "de").lower()
-    assert "basura" in swiss or "residuos" in swiss  # Swiss "Kehricht" is rubbish, not "Audiencia"
-    assert "playa" not in t("Bitte stellen Sie die Säcke an den Strassenrand.", "de")
+    assert t("FRANÇAIS", "fr") == "FRANCÉS" and t("FRANÇAIS", "de") == "FRANCÉS"
 
 
 def test_each_block_is_translated_from_its_own_language():

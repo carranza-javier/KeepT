@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+import statistics
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -24,12 +25,12 @@ from .. import i18n
 from ..capture import Capture
 from ..engine import Engine, TranslationJob
 from ..ocr.layout import Block, Rect
-from ..ocr.pipeline import ScreenText
+from ..ocr.pipeline import ScreenText, low_confidence
 from ..platform import services
 from . import effects
 from .pill import SHADOW, LangMenu, Pill, ui_font
 from ..translate import protect
-from .render import FitResult, button_shape, fit_text, free_space_below, free_space_left, free_space_right, is_boxed, sample_background, sample_text_color, stroke_ratio, weight_class
+from .render import FitResult, button_shape, room_for, fit_text, free_space_below, free_space_left, free_space_right, is_boxed, sample_background, sample_text_color, stroke_ratio, weight_class
 from .selection import Gesture, block_at, classify, select_blocks
 
 log = logging.getLogger(__name__)
@@ -101,6 +102,7 @@ class OverlayWindow(QWidget):
     ocr_pack_missing = Signal(str)  # language read without its Windows OCR pack
 
     _session_counter = 0  # global so that sessions of different overlay windows never collide
+    last_closed = 0.0  # perf_counter of the last close of any overlay
 
     def __init__(self, engine: Engine, target_lang: str, dark: bool, debug_blocks: bool = False, screen=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
@@ -138,7 +140,7 @@ class OverlayWindow(QWidget):
 
         engine.ocr_finished.connect(self._on_ocr_finished)
         engine.ocr_failed.connect(self._on_ocr_failed)
-        engine.ocr_refined.connect(self._on_ocr_refined)
+        engine.blocks_read.connect(self._on_blocks_read)
         engine.translated.connect(self._on_translated)
         engine.translation_finished.connect(self._on_translation_finished)
         engine.translation_failed.connect(self._on_translation_failed)
@@ -173,6 +175,10 @@ class OverlayWindow(QWidget):
         self.ocr_error: str | None = None
         self.pending_action: tuple | None = None
         self.items: dict[int, Item] = {}
+        self.read_ids: set[int] = set()  # blocks whose second OCR reading is done
+        self.waiting: set[int] = set()  # items (shimmering) waiting for that reading
+        self._dispatch_queued = False
+        self._hovered = -1
         self.stroke: list[QPointF] = []  # logical points
         self.stroke_tool = "mouse"
         self.dragging = False
@@ -247,6 +253,7 @@ class OverlayWindow(QWidget):
         self.timer.start()
         tm.append(time.perf_counter())
         self.repaint()  # first frame is rendered while still cloaked: no stale frame shows up
+        plat.set_capture_excluded(self._hwnd, False)  # screenshots of the user see the translation
         plat.set_cloaked(self._hwnd, False)
         tm.append(time.perf_counter())
         QTimer.singleShot(0, self._activate)
@@ -289,8 +296,12 @@ class OverlayWindow(QWidget):
         self.engine.set_active(0)
         self.timer.stop()
         plat = services()
+        # Out of captures first: KeepT's next capture must never see this overlay, even if DWM
+        # has not yet composed a frame without it.
+        plat.set_capture_excluded(self._hwnd, True)
         plat.set_cloaked(self._hwnd, True)
         plat.park_window(self._hwnd)
+        OverlayWindow.last_closed = time.perf_counter()
         plat.restore_foreground(self._prev_foreground)
         self.menu.hide()
         if self.screen_lang:
@@ -359,20 +370,14 @@ class OverlayWindow(QWidget):
             self.pill.end_message()
             action[0](*action[1:])
 
-    def _on_ocr_refined(self, session: int, better: dict) -> None:
-        """Better readings (right OCR language) for blocks nobody has asked to translate yet."""
+    def _on_blocks_read(self, session: int, ids) -> None:
         if session != self.session or self.state == State.IDLE:
             return
-        used = set()
-        for it in self.items.values():
-            used |= it.line_ids
-        n = 0
-        for b in self.blocks:
-            lines = better.get(b.id)
-            if lines and not any(id(l) in used for l in b.lines):
-                b.lines = lines
-                n += 1
-        log.info("OCR refined %d block(s) %.0f ms after hotkey", n, (time.perf_counter() - self._t_hotkey) * 1000)
+        self.read_ids.update(ids)
+        if self.items and not self._dispatch_queued:
+            # Coalesce the blocks read in the same event loop turn into one translation batch.
+            self._dispatch_queued = True
+            QTimer.singleShot(0, self._dispatch)
 
     def _on_ocr_failed(self, session: int, kind: str) -> None:
         if session != self.session or self.state == State.IDLE:
@@ -446,6 +451,17 @@ class OverlayWindow(QWidget):
                     weight=weight, extra_w=extra, t_added=self.now())
         item.meta["free_below"] = below
         item.meta["button"] = button
+        # Never paint over another block: the translation stays inside this room. Parts of the
+        # same line ("Grüsse · salutations · saluti") may share the room of the whole line once
+        # all of them are translated (see _layout_group).
+        h, w = bgra.shape[:2]
+        screen = Rect(0, 0, w, h)
+        src = block.inline_source
+        others = [o for o in self.blocks if o is not block]
+        item.meta["room"] = room_for(block.rect, [o.rect.adjusted(-1, -1, 1, 1) for o in others], screen).union(cover)
+        if src:
+            strangers = [o.rect.adjusted(-1, -1, 1, 1) for o in others if o.inline_source != src]
+            item.meta["room_group"] = room_for(block.rect, strangers, screen).union(cover)
         return item
 
     def _usable_language(self, block: Block, tgt: str) -> str:
@@ -477,7 +493,8 @@ class OverlayWindow(QWidget):
         return max(usable, key=usable.get) if usable else lang
 
     def translate_blocks(self, blocks: list[Block]) -> None:
-        tgt = self.target
+        """Show the shimmer over the blocks at once; each is translated as soon as its second
+        OCR reading is done (the engine reads these blocks before the rest of the screen)."""
         new: list[Item] = []
         for b in blocks:
             ids = frozenset(id(l) for l in b.lines)
@@ -486,40 +503,80 @@ class OverlayWindow(QWidget):
             for k, it in list(self.items.items()):
                 if it.line_ids <= ids:
                     del self.items[k]
+                    self.waiting.discard(k)
             new.append(self._make_item(b))
         if not new:
             return
         for it in new:
-            it.block.lang = self._usable_language(it.block, tgt)
-        todo = [it for it in new if (it.block.lang or self.screen_lang) != tgt and not looks_untranslatable(it.block.text)]
-        if not todo:
-            if not any(it.status == "done" for it in self.items.values()):
-                self.pill.show_message(i18n.tr("already_in", lang=i18n.lang_name(tgt)), 2500)
-            return
-        for it in todo:
             it.status = "pending"
             self.items[it.key] = it
-        langs = Counter(it.block.lang or self.screen_lang or "en" for it in todo)
-        try:
-            from ..ocr import backend as ocr_backend
-
-            available = set(ocr_backend().available_languages())
-            for lang in langs:
-                if available and lang not in available:
-                    self.ocr_pack_missing.emit(lang)
-        except Exception:  # noqa: BLE001 - only a hint for the user
-            pass
-        self.pill.set_languages(self._source_label(), tgt)
+            self.waiting.add(it.key)
+        unread = [it.block.id for it in new if it.block.id not in self.read_ids]
+        if unread:
+            self.engine.prioritize(self.session, unread)
+        self.pill.set_languages(self._source_label(), self.target)
         self.pill.set_original_shown(False)
         self.show_original = False
         self.pill.set_mode("result")
         self.state = State.TRANSLATING
-        jobs = [TranslationJob(it.key, it.block.text, it.block.lang or self.screen_lang or "en") for it in todo]
         self._t_request = time.perf_counter()
-        # Names after a postal code anywhere on the screen ("3999 Musterwil") stay unchanged
-        # in every block.
+        self._dispatch()
+
+    def _dispatch(self) -> None:
+        """Send the waiting blocks whose second reading is done to translation."""
+        self._dispatch_queued = False
+        if self.state == State.IDLE:
+            return
+        tgt = self.target
+        # Names after a postal code anywhere on the screen ("3999 Musterwil") stay unchanged in
+        # every block. A name found by a later reading makes the blocks that contain it and were
+        # already sent without it go again.
         names = protect.screen_names(b.text for b in self.blocks)
-        self.engine.translate(self.session, jobs, tgt, names)
+        redo = [it for it in self.items.values()
+                if it.key not in self.waiting and "names" in it.meta and it.meta["names"] != names
+                and any(n in it.block.text for n in names - it.meta["names"])]
+        ready = [self.items[k] for k in sorted(self.waiting) if k in self.items and self.items[k].block.id in self.read_ids]
+        self.waiting -= {it.key for it in ready}
+        todo: list[Item] = []
+        skipped_lang = False
+        for it in ready:
+            b = it.block
+            if low_confidence(b):
+                # Unsure reading (icons, noise, decorative fonts): nothing is painted over it.
+                log.info("Block %d not translated: low OCR confidence (%.2f)", b.id, b.meta.get("confidence", 0.0))
+                del self.items[it.key]
+                continue
+            b.lang = self._usable_language(b, tgt)
+            if (b.lang or self.screen_lang) == tgt or looks_untranslatable(b.text):
+                skipped_lang = True
+                del self.items[it.key]
+                continue
+            todo.append(it)
+        if redo:
+            log.info("Translating %d block(s) again with the names %s", len(redo), ", ".join(sorted(names)))
+        todo += redo
+        if todo:
+            langs = Counter(it.block.lang or self.screen_lang or "en" for it in todo)
+            try:
+                from ..ocr import backend as ocr_backend
+
+                available = set(ocr_backend().available_languages())
+                for lang in langs:
+                    if available and lang not in available:
+                        self.ocr_pack_missing.emit(lang)
+            except Exception:  # noqa: BLE001 - only a hint for the user
+                pass
+            self.pill.set_languages(self._source_label(), tgt)
+            jobs = [TranslationJob(it.key, it.block.text, it.block.lang or self.screen_lang or "en") for it in todo]
+            for it in todo:
+                it.meta["names"] = names
+            self.engine.translate(self.session, jobs, tgt, names)
+        if ready and not self.waiting and not any(it.status in ("pending", "done") for it in self.items.values()):
+            self.state = State.READY
+            self.pill.set_mode("ready")
+            self._t_request = None
+            msg = i18n.tr("already_in", lang=i18n.lang_name(tgt)) if skipped_lang else i18n.tr("no_text")
+            self.pill.show_message(msg, 2500)
 
     def _source_label(self) -> str | None:
         """Source language for the pill: the language of the translated blocks, or "auto" when
@@ -561,9 +618,23 @@ class OverlayWindow(QWidget):
             return fit_text(item.text, inner + grow, height, b.font_px, min_px, measure,
                             line_spacing=spacing, max_grow=1.0)
         # The background may grow down only over free background (never over other text).
+        room = item.meta.get("room")
         grow = 1.0 + max(0.0, item.meta.get("free_below", 0.0) - b.font_px * 0.3) / max(height, 1.0)
-        return fit_text(item.text, area.w + item.extra_w, height, b.font_px, min_px, measure,
-                        line_spacing=spacing, max_grow=max(1.0, min(1.6, grow)))
+        width = area.w + item.extra_w
+        if room is not None:
+            width = min(width, room.right - area.x - 1)
+            grow = min(grow, (room.bottom - area.y) / max(height, 1.0))
+        fit = fit_text(item.text, width, height, b.font_px, min_px, measure,
+                       line_spacing=spacing, max_grow=max(1.0, min(1.6, grow)))
+        if room is not None:
+            # Still taller than the room: smaller text (down to 70 % of the legible minimum)
+            # rather than text over the next block.
+            limit = room.bottom - area.y
+            px = fit.px
+            while fit.height > limit and px > min_px * 0.7:
+                px -= max(0.5, px * 0.05)
+                fit = fit_text(item.text, width, height, px, px, measure, line_spacing=spacing, max_grow=1.0)
+        return fit
 
     def _on_translated(self, session: int, key: int, text: str) -> None:
         if session != self.session:
@@ -587,8 +658,11 @@ class OverlayWindow(QWidget):
             log.exception("Fitting failed")
             item.status = "error"
             return
+        if item.status != "done":
+            item.t_done = self.now()
         item.status = "done"
-        item.t_done = self.now()
+        item.meta.pop("group", None)
+        self._layout_group(item)
         self.last_stroke_path = None  # the selection outline never stays over a translation
         if getattr(self, "_t_request", None):
             log.info("First block on screen %.0f ms after the translation request (%.0f ms after hotkey)",
@@ -726,13 +800,19 @@ class OverlayWindow(QWidget):
 
     def mouseMoveEvent(self, e):
         pos = e.position()
+        x, y = self.to_phys(pos)
+        under = block_at(self.blocks, x, y) if self.ocr_done else None
+        if under is not None and under.id not in self.read_ids and under.id != self._hovered:
+            # The pointer goes to a block before clicking it or while selecting it: read that
+            # block first, so its translation does not wait for the second OCR reading.
+            self._hovered = under.id
+            self.engine.prioritize(self.session, [under.id])
         if self.dragging:
             last = self.stroke[-1]
             if (pos - last).manhattanLength() >= 1.5:
                 self.stroke.append(pos)
             return
-        x, y = self.to_phys(pos)
-        over = self._item_at(x, y) is not None or (self.ocr_done and block_at(self.blocks, x, y) is not None)
+        over = self._item_at(x, y) is not None or under is not None
         self.setCursor(Qt.PointingHandCursor if over else Qt.ArrowCursor)
 
     def mouseReleaseEvent(self, e):
@@ -797,9 +877,14 @@ class OverlayWindow(QWidget):
         ordered = sorted(self.items.values(), key=lambda i: i.block.rect.w * i.block.rect.h, reverse=True)
         # Translations go under the dimming so they always blend with their surroundings;
         # pending blocks go above it, which highlights what is being translated.
+        # All backgrounds first, then all texts: parts of one line laid out together may run
+        # over each other's original place.
         for it in ordered:
             if it.status == "done":
-                self._paint_item(p, it, t)
+                self._paint_item(p, it, t, "bg")
+        for it in ordered:
+            if it.status == "done":
+                self._paint_item(p, it, t, "text")
         if self.dim > 0.002:
             p.fillRect(full, QColor(0, 0, 0, int(255 * self.dim)))
         for it in ordered:
@@ -816,8 +901,9 @@ class OverlayWindow(QWidget):
             log.info("Overlay visible %.0f ms after hotkey (first frame painted)",
                      (time.perf_counter() - self._t_hotkey) * 1000)
 
-    def _paint_item(self, p: QPainter, it: Item, t: float) -> None:
-        cover = self.to_logical(self._item_rect(it))
+    def _paint_item(self, p: QPainter, it: Item, t: float, phase: str = "all") -> None:
+        group = it.meta.get("group") if it.status == "done" else None
+        cover = group[0] if group else self.to_logical(self._item_rect(it))
         box = it.meta.get("box") if it.status == "done" else None
         radius = box[1] / self.scale if box else min(6.0, cover.height() / 4)
         if it.status == "pending":
@@ -827,7 +913,7 @@ class OverlayWindow(QWidget):
         if it.status != "done" or it.layout is None:
             return
         fade = effects.ease_out_cubic((t - it.t_done) / FADE_MS)
-        if fade < 1:
+        if fade < 1 and phase != "text":
             effects.paint_shimmer(p, self.to_logical(it.block.cover_rect()), min(6.0, cover.height() / 4),
                                   it.bg, t, 1 - fade)
         alpha = fade * (1 - self.original_mix)
@@ -835,11 +921,69 @@ class OverlayWindow(QWidget):
             return
         p.save()
         p.setOpacity(alpha)
-        path = QPainterPath()
-        path.addRoundedRect(cover, radius, radius)
-        p.fillPath(path, it.bg)
-        self._paint_text(p, it)
+        room = group[1] if group else it.meta.get("room")
+        if room is not None:
+            p.setClipRect(self.to_logical(room))
+        if phase != "text":
+            path = QPainterPath()
+            path.addRoundedRect(cover, radius, radius)
+            p.fillPath(path, it.bg)
+        if phase != "bg":
+            self._paint_text(p, it)
         p.restore()
+
+    def _layout_group(self, item: Item) -> None:
+        """Parts of one original line, once all are translated, are laid out together: one font
+        size, one baseline, one after the other with their separators, inside the room of the
+        whole line. Otherwise each part keeps its own layout."""
+        src = item.block.inline_source
+        if not src:
+            return
+        blocks = [b for b in self.blocks if b.inline_source == src]
+        members = [self.items.get(b.id) for b in blocks]
+        if any(m is None or m.status != "done" or m.fit is None or "room_group" not in m.meta for m in members):
+            return
+        members.sort(key=lambda m: m.block.rect.x)
+        s = self.scale
+        em0 = min(m.block.font_px for m in members)
+        gaps = [b.block.rect.x - a.block.rect.right for a, b in zip(members, members[1:])]
+        room = members[0].meta["room_group"]
+        for m in members[1:]:
+            room = room.union(m.meta["room_group"])
+        x0 = members[0].block.rect.x
+        avail = room.right - x0 - 2
+        min_px = min(MIN_TEXT_PX * s, em0)
+        px = em0
+        while True:
+            widths = [self._measure(m.text, px, m.weight) for m in members]
+            if sum(widths) + sum(gaps) <= avail or px <= min_px:
+                break
+            px = max(min_px, px - max(0.5, px * 0.04))
+        if sum(widths) + sum(gaps) > avail:
+            return  # does not fit on one line: each part keeps its own layout
+        baseline = statistics.median(m.block.baseline for m in members) - (em0 - px) * 0.36
+        x = x0
+        boxes = []
+        for i, m in enumerate(members):
+            font, fm = self._font(px, m.weight)
+            text_box = QRectF(x / s - 2, baseline / s - fm.ascent() * 0.8 - 2, widths[i] / s + 4,
+                              fm.ascent() * 0.8 + fm.descent() + 4)
+            own = text_box.united(self.to_logical(m.block.cover_rect()))
+            seps = []
+            if i + 1 < len(members):
+                seps.append(((x + widths[i] + gaps[i] / 2) / s, baseline / s))
+            m.layout = (font, [(x / s, baseline / s, m.text)], own)
+            m.fit = FitResult(px, [m.text], px, px, px)
+            m.meta["seps"] = seps
+            boxes.append(own)
+            if i < len(gaps):
+                x += widths[i] + gaps[i]
+        group_box = boxes[0]
+        for b in boxes[1:]:
+            group_box = group_box.united(b)
+        group_box = group_box.intersected(self.to_logical(room))
+        for m in members:
+            m.meta["group"] = (group_box, room)
 
     def _layout_text(self, it: Item) -> tuple:
         """Place each wrapped line (logical px) and compute the background box that covers
@@ -870,7 +1014,17 @@ class OverlayWindow(QWidget):
             left, right = min(left, x - 2), max(right, x + w + 2)
         top = min(cover.top(), first - fm.ascent() * 0.8 - 2)
         bottom = max(cover.bottom(), first + (len(fit.lines) - 1) * lh + fm.descent() + 2)
-        return font, placed, QRectF(left, top, right - left, bottom - top)
+        box_rect = QRectF(left, top, right - left, bottom - top)
+        room = it.meta.get("room")
+        if room is not None:
+            room_l = self.to_logical(room)
+            if box_rect.top() < room_l.top() and box_rect.bottom() < room_l.bottom():
+                # Lines centred on a single original line rose above the room: move them down.
+                dy = min(room_l.top() - box_rect.top(), room_l.bottom() - box_rect.bottom())
+                placed = [(x, y + dy, t) for x, y, t in placed]
+                box_rect.translate(0, dy)
+            box_rect = box_rect.intersected(room_l)
+        return font, placed, box_rect
 
     def _paint_text(self, p: QPainter, it: Item) -> None:
         font, placed, _ = it.layout
@@ -878,6 +1032,10 @@ class OverlayWindow(QWidget):
         p.setPen(it.fg)
         for x, y, line in placed:
             p.drawText(QPointF(x, y), line)
+        if it.meta.get("group"):
+            fm = self._font(it.fit.px, it.weight)[1]
+            for x, y in it.meta.get("seps", []):
+                p.drawText(QPointF(x - fm.horizontalAdvance("·") / 2, y), "·")
 
     def _paint_stroke(self, p: QPainter, t: float) -> None:
         center = QPointF(self.width() / 2, self.height() / 2)

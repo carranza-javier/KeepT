@@ -12,7 +12,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from .ocr import backend as ocr_backend
-from .ocr.pipeline import first_pass, refine
+from .ocr.pipeline import first_pass, reread_block
 from .translate.models import ModelError
 from .translate.translator import Translator, route
 
@@ -29,7 +29,7 @@ class TranslationJob:
 class Engine(QObject):
     ocr_finished = Signal(int, object)  # session, ScreenText
     ocr_failed = Signal(int, str)  # session, error kind
-    ocr_refined = Signal(int, object)  # session, {block id: better lines}
+    blocks_read = Signal(int, object)  # session, ids of blocks read again by the line recognizer
     progress = Signal(int, str, float)  # session, kind ("download:<src>" / "loading"), fraction (-1 unknown)
     translated = Signal(int, int, str)  # session, block key, text
     translation_finished = Signal(int, float)  # session, seconds
@@ -49,6 +49,11 @@ class Engine(QObject):
         self._load_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-load")
         self._active = 0
         self._lock = threading.Lock()
+        # Second reading of the blocks of the current session: urgent ids (asked to translate)
+        # go before the rest, which is read in reading order.
+        self._reread_cond = threading.Condition()
+        self._urgent: list[int] = []
+        self._translating = 0  # translation calls queued or running
 
     # -- sessions ------------------------------------------------------------------
     def set_active(self, session: int) -> None:
@@ -75,15 +80,46 @@ class Engine(QObject):
             return
         if not self._alive(session):
             return
+        with self._reread_cond:
+            self._urgent = []
         self.ocr_finished.emit(session, result)
-        # Re-reading blocks in other languages comes after, so the overlay can react at once.
-        try:
-            better = refine(ocr, bgra, result, alive=lambda: self._alive(session))
-        except Exception:  # noqa: BLE001
-            log.exception("OCR refinement failed")
-            return
-        if better and self._alive(session):
-            self.ocr_refined.emit(session, better)
+        self._reread(session, result.blocks, bgra)
+
+    def prioritize(self, session: int, block_ids) -> None:
+        """Read these blocks again before the others (the user wants them translated)."""
+        with self._reread_cond:
+            if self._alive(session):
+                self._urgent = [*block_ids, *(i for i in self._urgent if i not in block_ids)]
+                self._reread_cond.notify()
+
+    def _reread(self, session: int, blocks, bgra: np.ndarray) -> None:
+        """Second reading of every block, on the OCR thread, until done or a new session."""
+        from .ocr.recognizer import recognizer
+
+        t0 = time.perf_counter()
+        rec = recognizer()
+        by_id = {b.id: b for b in blocks}
+        rest = [b.id for b in blocks]
+        done: set[int] = set()
+        while self._alive(session) and len(done) < len(by_id):
+            with self._reread_cond:
+                urgent = [i for i in self._urgent if i not in done and i in by_id]
+                self._urgent = urgent
+                if not urgent and self._translating:
+                    # Blocks nobody asked for yet wait while a translation runs: both need
+                    # the CPU, and the translation is what the user is waiting for.
+                    self._reread_cond.wait(0.1)
+                    continue
+            nxt = urgent[0] if urgent else next(i for i in rest if i not in done)
+            try:
+                reread_block(by_id[nxt], bgra, rec)
+            except Exception:  # noqa: BLE001 - keep the Windows OCR reading of this block
+                log.exception("Second reading of block %d failed", nxt)
+                by_id[nxt].meta["confidence"] = 1.0
+            done.add(nxt)
+            if self._alive(session):
+                self.blocks_read.emit(session, [nxt])
+        log.info("Second reading of %d/%d block(s) in %.0f ms", len(done), len(by_id), (time.perf_counter() - t0) * 1000)
 
     def warm_up(self, lang: str) -> None:
         """Load WinRT and the OCR engine once, off the UI thread."""
@@ -92,12 +128,18 @@ class Engine(QObject):
             t0 = time.perf_counter()
             try:
                 ocr = ocr_backend()
-                langs = ocr.available_languages()
-                # Every recognizer is used for re-reading blocks, so create them all now.
-                for code in sorted(langs, key=lambda c: c != lang):
-                    ocr.recognize(np.full((48, 160, 4), 255, np.uint8), code)
+                ocr.recognize(np.full((48, 160, 4), 255, np.uint8), lang)
             except Exception as exc:  # noqa: BLE001
                 log.warning("OCR warm up failed: %s", exc)
+            try:
+                from .ocr.layout import Rect
+                from .ocr.recognizer import recognizer
+
+                rec = recognizer()
+                if rec is not None:
+                    rec.read(np.full((24, 120, 4), 255, np.uint8), [Rect(4, 4, 100, 16)])
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Line recognizer warm up failed: %s", exc)
             try:
                 from .translate import langdetect
 
@@ -111,7 +153,17 @@ class Engine(QObject):
     # -- translation -----------------------------------------------------------------
     def translate(self, session: int, jobs: list[TranslationJob], tgt: str,
                   names: frozenset[str] = frozenset()) -> None:
-        self._tr_pool.submit(self._run_translate, session, jobs, tgt, names)
+        with self._reread_cond:
+            self._translating += 1
+        self._tr_pool.submit(self._run_translate_counted, session, jobs, tgt, names)
+
+    def _run_translate_counted(self, *args) -> None:
+        try:
+            self._run_translate(*args)
+        finally:
+            with self._reread_cond:
+                self._translating -= 1
+                self._reread_cond.notify()
 
     def _run_translate(self, session: int, jobs: list[TranslationJob], tgt: str,
                        names: frozenset[str] = frozenset()) -> None:

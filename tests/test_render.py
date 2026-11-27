@@ -174,3 +174,16 @@ def test_weight_classes_prefer_regular():
     assert [weight_class(r) for r in (0.099, 0.113, 0.118, 0.124)] == [0, 0, 0, 0]
     assert [weight_class(r) for r in (0.138, 0.152)] == [1, 1]
     assert [weight_class(r) for r in (0.174, 0.19)] == [2, 2]
+
+
+def test_room_stops_at_neighbouring_blocks():
+    from keept.overlay.render import room_for
+
+    label = Rect(100, 100, 80, 20)  # "ITALIANO"
+    below = Rect(100, 130, 600, 60)  # the paragraph under it
+    right = Rect(400, 98, 100, 24)  # a block on the same row
+    diagonal = Rect(300, 125, 50, 10)  # below and to the right
+    room = room_for(label, [below, right, diagonal], Rect(0, 0, 1920, 1080))
+    assert room.bottom <= below.y and room.right <= right.x
+    assert room.intersection_area(diagonal) == 0
+    assert room.x <= label.x and room.bottom >= label.bottom and room.right >= label.right

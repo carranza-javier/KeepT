@@ -13,3 +13,4 @@ winrt-Windows.Media.Ocr==4!10.0.28000.2957
 winrt-Windows.Storage.Streams==4!10.0.28000.2957
 PyYAML==6.0.4
 py3langid==0.4.0
+onnxruntime==1.32.0

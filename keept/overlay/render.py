@@ -276,6 +276,51 @@ def weight_class(ratio: float) -> int:
 Measure = Callable[[str, float], float]  # (text, pixel size) -> width
 
 
+def room_for(rect: Rect, others: list[Rect], bounds: Rect) -> Rect:
+    """The area around `rect` that holds no other block. A translation and its background are
+    never painted outside it, so they never cover other text (a label translated into a
+    longer word must not run over the paragraph below)."""
+    left, top, right, bottom = bounds.x, bounds.y, bounds.right, bounds.bottom
+    others = [o for o in others if o.intersection_area(rect) <= 0]
+    for o in others:
+        if o.y < rect.bottom and o.bottom > rect.y:  # beside
+            if o.x >= rect.right:
+                right = min(right, o.x)
+            elif o.right <= rect.x:
+                left = max(left, o.right)
+        elif o.x < rect.right and o.right > rect.x:  # above or below
+            if o.y >= rect.bottom:
+                bottom = min(bottom, o.y)
+            elif o.bottom <= rect.y:
+                top = max(top, o.bottom)
+    # Diagonal neighbours: cut the side that keeps the larger area.
+    for o in others:
+        room = Rect(left, top, right - left, bottom - top)
+        if o.intersection_area(room) <= 0:
+            continue
+        cuts = []
+        if o.y >= rect.bottom:
+            cuts.append(((right - left) * (o.y - top), "bottom", o.y))
+        if o.bottom <= rect.y:
+            cuts.append(((right - left) * (bottom - o.bottom), "top", o.bottom))
+        if o.x >= rect.right:
+            cuts.append(((o.x - left) * (bottom - top), "right", o.x))
+        if o.right <= rect.x:
+            cuts.append(((right - o.right) * (bottom - top), "left", o.right))
+        if not cuts:
+            continue
+        _, side, v = max(cuts)
+        if side == "bottom":
+            bottom = v
+        elif side == "top":
+            top = v
+        elif side == "right":
+            right = v
+        else:
+            left = v
+    return Rect(left, top, right - left, bottom - top)
+
+
 @dataclass
 class FitResult:
     px: float

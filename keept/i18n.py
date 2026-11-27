@@ -637,6 +637,16 @@ _STRINGS = {
         'nl': 'taalherkenning',
         'pl': 'wykrywanie języka',
     },
+    'credit_role_ocr': {
+        'de': 'Texterkennung',
+        'en': 'text recognition',
+        'es': 'reconocimiento de texto',
+        'fr': 'reconnaissance du texte',
+        'it': 'riconoscimento del testo',
+        'pt': 'reconhecimento de texto',
+        'nl': 'tekstherkenning',
+        'pl': 'rozpoznawanie tekstu',
+    },
     'credit_role_ui': {
         'de': 'Oberfläche',
         'en': 'user interface',

@@ -27,11 +27,15 @@ MODELS = (
            "\"OPUS-MT: Building open translation services for the World\", EAMT 2020; "
            "\"The Tatoeba Translation Challenge\", WMT 2020.",
            CC_BY[0], "https://github.com/Helsinki-NLP/Opus-MT", "credit_note_converted"),
+    Credit("PP-OCRv5 latin text line recognizer (PaddleOCR), ONNX export by RapidOCR", "credit_role_ocr",
+           "PaddlePaddle Authors; RapidAI", "Apache-2.0", "https://github.com/PaddlePaddle/PaddleOCR"),
 )
 
 LIBRARIES = (
     Credit("Qt 6 / PySide6", "credit_role_ui", "The Qt Company", "LGPL-3.0", "https://www.qt.io/licensing/",
            "credit_note_lgpl"),
+    Credit("ONNX Runtime", "credit_role_ocr", "Microsoft Corporation", "MIT",
+           "https://github.com/microsoft/onnxruntime"),
     Credit("CTranslate2", "credit_role_engine", "SYSTRAN, OpenNMT", "MIT", "https://github.com/OpenNMT/CTranslate2"),
     Credit("Intel oneMKL, Intel OpenMP (bundled with CTranslate2)", "credit_role_engine", "Intel Corporation",
            "Intel Simplified Software License", "https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html"),
@@ -43,7 +47,7 @@ LIBRARIES = (
     Credit("NumPy", "credit_role_misc", "NumPy Developers", "BSD-3-Clause", "https://numpy.org"),
     Credit("python-mss", "credit_role_misc", "Mickaël Schoentgen", "MIT", "https://github.com/BoboTiG/python-mss"),
     Credit("PyWinRT", "credit_role_misc", "PyWinRT contributors", "MIT", "https://github.com/pywinrt/pywinrt"),
-    Credit("PyYAML, joblib, regex, click, tqdm", "credit_role_misc", "Their respective authors",
+    Credit("PyYAML, joblib, regex, click, tqdm, protobuf, flatbuffers", "credit_role_misc", "Their respective authors",
            "MIT, BSD-3-Clause, Apache-2.0, MPL-2.0", "https://pypi.org"),
     Credit("Official commune register of Switzerland (list of municipality names)", "credit_role_misc",
            "Swiss Federal Statistical Office (BFS/OFS)", "Open use, source must be named",
