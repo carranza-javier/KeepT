@@ -6,7 +6,7 @@ import zipfile
 import pytest
 
 from keept.translate.models import ModelError, ModelStore
-from keept.translate.translator import Translator, match_case, route, split_sentences
+from keept.translate.translator import Translator, keep_final_mark, match_case, route, split_sentences
 
 
 class FakeModel:
@@ -92,6 +92,24 @@ def test_cache_avoids_retranslation(translator):
 def test_same_language_is_identity(translator):
     assert translator.translate(["Hola"], "es", "es") == ["Hola"]
     assert translator.loaded == {}
+
+
+def test_keep_final_mark():
+    assert keep_final_mark("Die Abfuhr kann sich verschieben.", "la recogida puede retrasarse") == "la recogida puede retrasarse."
+    assert keep_final_mark("Kommen Sie?", "¿Viene usted") == "¿Viene usted?"
+    assert keep_final_mark("Ende.", "Fin.") == "Fin."
+    assert keep_final_mark("Er sagte «ja».", "Dijo «sí».") == "Dijo «sí»."
+    assert keep_final_mark("Er sagte: «Ja.»", "Dijo: «Sí.»") == "Dijo: «Sí.»"
+    assert keep_final_mark("Kehrichtabfuhr im Winter", "Recogida en invierno") == "Recogida en invierno"
+
+
+def test_final_period_dropped_by_the_model_comes_back(tmp_path):
+    class Dropper:
+        def translate(self, sentences):
+            return [s.rstrip(".") for s in sentences]
+
+    t = Translator(ModelStore(tmp_path), loader=lambda s, g, p: Dropper())
+    assert t.translate(["Erster Satz. Zweiter Satz."], "de", "es") == ["Erster Satz. Zweiter Satz."]
 
 
 def test_match_case():

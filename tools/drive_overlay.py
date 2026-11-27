@@ -8,6 +8,10 @@ so it also runs while the Windows session is locked.
 Timing as in the app (engines warmed up and models loaded before the hotkey):
 
     python tools/drive_overlay.py screen.png --warm de,fr,it,en --scenario timing --pick "Ab dem"
+
+"Translate screen" (Enter) on the whole page, first and last block:
+
+    python tools/drive_overlay.py screen.png --warm de,fr,it,en --scenario page
 """
 
 from __future__ import annotations
@@ -159,6 +163,8 @@ def main() -> int:
 
     if sc == "timing":
         return timing(d, args)
+    if sc == "page":
+        return page(d, args)
 
     d.open()
     d.pump(110)
@@ -282,6 +288,41 @@ def timing(d: "Driver", args) -> int:
     for kind, values in results.items():
         values.sort()
         print(f"{kind:9s}: median {values[len(values) // 2]:.0f} ms, all {[round(v) for v in values]}")
+    d.engine.shutdown()
+    return 0
+
+
+def page(d: "Driver", args) -> int:
+    """"Translate screen" (Enter) on the whole page once its OCR is done: time to the first
+    translated block and to the last one, and the order in which the languages appear."""
+    for run in range(args.runs):
+        d.engine.translator._cache.clear()
+        d.ov.open(d.capture, time.perf_counter())
+        d.wait_until(lambda: d.ov.ocr_done, 10000)
+        d.pump(300)
+        t0 = time.perf_counter()
+        d.key(Qt.Key_Return)
+        first = None
+        order: list[str] = []
+        seen: set[int] = set()
+        while time.perf_counter() - t0 < 60:
+            QApplication.processEvents()
+            for k, it in d.ov.items.items():
+                if it.status == "done" and k not in seen:
+                    seen.add(k)
+                    order.append(it.block.lang or "?")
+                    first = first or time.perf_counter() - t0
+            if d.translation_done():
+                break
+            time.sleep(0.002)
+        total = time.perf_counter() - t0
+        print(f"run {run} page: first block {first * 1000:.0f} ms, all {len(seen)} blocks {total * 1000:.0f} ms,"
+              f" order {''.join(l[0] for l in order)}", flush=True)
+        if run == 0:
+            d.pump(400)
+            d.shot("page")
+        d.key(Qt.Key_Escape)
+        d.pump(300)
     d.engine.shutdown()
     return 0
 

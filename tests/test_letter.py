@@ -206,9 +206,7 @@ def test_each_block_is_translated_from_its_own_language():
     jobs = [TranslationJob(1, LETTER["fr"][3], "fr"), TranslationJob(2, LETTER["it"][3], "it"),
             TranslationJob(3, LETTER["en"][1], "en")]
     engine.translate(1, jobs, "es")
-    done = threading.Event()
-    engine._tr_pool.submit(done.set)
-    assert done.wait(10)
+    assert engine.wait_translations(10)
     assert out[1].startswith("[fr]") and out[2].startswith("[it]") and out[3].startswith("[en]")
     assert {p[0] for p in used} == {"fr", "it", "en"}
     engine.shutdown()

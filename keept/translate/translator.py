@@ -55,6 +55,21 @@ def route(src: str, tgt: str, pairs=KNOWN_PAIRS) -> list[tuple[str, str]]:
     raise ValueError(f"no translation route {src}->{tgt}")
 
 
+_FINAL_MARKS = ".!?…"
+_CLOSERS = "\"'”»)]"
+
+
+def keep_final_mark(original: str, translated: str) -> str:
+    """The models sometimes drop the final period of a sentence (the last sentence of a
+    paragraph came back without it): give the translation the mark of the original."""
+    src, out = original.rstrip(), translated.rstrip()
+    if not src or not out or src[-1] not in _FINAL_MARKS:
+        return translated
+    if out.rstrip(_CLOSERS)[-1:] in _FINAL_MARKS + ":;":
+        return translated
+    return out + src[-1]
+
+
 def match_case(original: str, translated: str) -> str:
     letters = [c for c in original if c.isalpha()]
     if len(letters) >= 2 and all(c.isupper() for c in letters):
@@ -71,14 +86,19 @@ class Translator:
 
     def __init__(self, store: ModelStore | None = None, loader: Callable[[str, str, Progress | None], PairModel] | None = None):
         self.store = store or ModelStore()
-        self._threads = max(1, min(8, (os.cpu_count() or 4) // 2))
+        # Two threads per model: measured as fast as six for one block, and the models of the
+        # languages of a page run at the same time (see Engine), each with its own threads.
+        self._threads = 2 if (os.cpu_count() or 4) >= 4 else 1
         # Keep only an external loader here: storing the bound self._default_loader would create
         # a reference cycle that kept every CTranslate2 model alive until the interpreter shut
         # down, and freeing them that late crashed the process at exit.
         self._loader = loader
         self._models: dict[tuple[str, str], PairModel] = {}
         self._load_lock = threading.Lock()
-        self._run_lock = threading.Lock()
+        # One lock per model: CTranslate2 runs one batch at a time per model anyway, and
+        # different models (German and French blocks of one page) run in parallel.
+        self._run_locks: dict[tuple[str, str], threading.Lock] = {}
+        self._locks_lock = threading.Lock()
         self._cache: dict[tuple[str, str, str], str] = {}
 
     def _default_loader(self, src: str, tgt: str, progress: Progress | None) -> PairModel:
@@ -172,7 +192,7 @@ class Translator:
                 item = items[i]
                 restored = item.restore(text)
                 if restored is not None and item.check(restored):
-                    results[i] = restored
+                    results[i] = keep_final_mark(sentences[i], restored)
                 elif level[i] < item.max_level():
                     nxt = level[i] + 1
                     if nxt == 1 and not item.has("name"):
@@ -189,6 +209,8 @@ class Translator:
         current = texts
         for pair in route(src, tgt):
             model = self.model(pair, progress)
-            with self._run_lock:
+            with self._locks_lock:
+                lock = self._run_locks.setdefault(pair, threading.Lock())
+            with lock:
                 current = model.translate(current) if current else []
         return [c.strip() for c in current]

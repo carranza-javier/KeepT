@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -17,6 +18,11 @@ from .translate.models import ModelError
 from .translate.translator import Translator, route
 
 log = logging.getLogger(__name__)
+
+# Threads that help the OCR thread with the second reading of the blocks.
+REREAD_HELPERS = 3
+# Blocks of one language translated in one call at most (CTranslate2 batches their sentences).
+MAX_BATCH = 8
 
 
 @dataclass
@@ -40,7 +46,16 @@ class Engine(QObject):
         super().__init__(parent)
         self.translator = translator or Translator()
         self._ocr_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-ocr")
+        self._reread_pool = ThreadPoolExecutor(REREAD_HELPERS, thread_name_prefix="keept-reread")
+        # Preloads and releases of models run here, one at a time.
         self._tr_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-translate")
+        # Translations get one thread per source language: each language has its own model,
+        # so a page in German, French and Italian translates the three at the same time,
+        # while the blocks of one language keep their reading order.
+        self._lang_pools: dict[str, ThreadPoolExecutor] = {}
+        self._queues: dict[str, deque] = {}  # source language -> (session, tgt, names, job)
+        self._draining: set[str] = set()  # languages whose thread is working on its queue
+        self._first_done = -1  # last session that already has a translated block
         # Downloads get their own thread so a long model download never blocks translating
         # with the models that are already there.
         self._dl_pool = ThreadPoolExecutor(1, thread_name_prefix="keept-download")
@@ -90,35 +105,57 @@ class Engine(QObject):
         with self._reread_cond:
             if self._alive(session):
                 self._urgent = [*block_ids, *(i for i in self._urgent if i not in block_ids)]
-                self._reread_cond.notify()
+                self._reread_cond.notify_all()
 
     def _reread(self, session: int, blocks, bgra: np.ndarray) -> None:
-        """Second reading of every block, on the OCR thread, until done or a new session."""
+        """Second reading of every block until done or a new session. The OCR thread reads
+        the screen in reading order; the blocks the user asks for go first, and REREAD_HELPERS
+        more threads read them too, one block each (the recognizer is thread safe), so they
+        reach translation sooner."""
         from .ocr.recognizer import recognizer
 
         t0 = time.perf_counter()
         rec = recognizer()
         by_id = {b.id: b for b in blocks}
         rest = [b.id for b in blocks]
-        done: set[int] = set()
-        while self._alive(session) and len(done) < len(by_id):
+        taken: set[int] = set()
+        done: list[int] = []
+
+        def take(helper: bool) -> int | None:
             with self._reread_cond:
-                urgent = [i for i in self._urgent if i not in done and i in by_id]
-                self._urgent = urgent
-                if not urgent and self._translating:
-                    # Blocks nobody asked for yet wait while a translation runs: both need
-                    # the CPU, and the translation is what the user is waiting for.
-                    self._reread_cond.wait(0.1)
-                    continue
-            nxt = urgent[0] if urgent else next(i for i in rest if i not in done)
-            try:
-                reread_block(by_id[nxt], bgra, rec)
-            except Exception:  # noqa: BLE001 - keep the Windows OCR reading of this block
-                log.exception("Second reading of block %d failed", nxt)
-                by_id[nxt].meta["confidence"] = 1.0
-            done.add(nxt)
-            if self._alive(session):
-                self.blocks_read.emit(session, [nxt])
+                while self._alive(session) and len(taken) < len(by_id):
+                    urgent = [i for i in self._urgent if i not in taken and i in by_id]
+                    self._urgent = urgent
+                    # Helpers only read blocks the user asked for, and only when there are
+                    # several: one block (a click) is read faster alone than next to another.
+                    if urgent and (not helper or len(urgent) >= 2):
+                        taken.add(urgent[0])
+                        return urgent[0]
+                    if helper or self._translating:
+                        # Blocks nobody asked for yet wait while a translation runs: both need
+                        # the CPU, and the translation is what the user is waiting for.
+                        self._reread_cond.wait(0.1)
+                        continue
+                    nxt = next(i for i in rest if i not in taken)
+                    taken.add(nxt)
+                    return nxt
+                return None
+
+        def work(helper: bool = False) -> None:
+            while (nxt := take(helper)) is not None:
+                try:
+                    reread_block(by_id[nxt], bgra, rec)
+                except Exception:  # noqa: BLE001 - keep the Windows OCR reading of this block
+                    log.exception("Second reading of block %d failed", nxt)
+                    by_id[nxt].meta["confidence"] = 1.0
+                done.append(nxt)
+                if self._alive(session):
+                    self.blocks_read.emit(session, [nxt])
+
+        helpers = [self._reread_pool.submit(work, True) for _ in range(REREAD_HELPERS)]
+        work()
+        for f in helpers:
+            f.result()
         log.info("Second reading of %d/%d block(s) in %.0f ms", len(done), len(by_id), (time.perf_counter() - t0) * 1000)
 
     def warm_up(self, lang: str) -> None:
@@ -153,65 +190,102 @@ class Engine(QObject):
     # -- translation -----------------------------------------------------------------
     def translate(self, session: int, jobs: list[TranslationJob], tgt: str,
                   names: frozenset[str] = frozenset()) -> None:
+        """Queue blocks for translation. Each source language has its own queue and thread."""
+        start: list[str] = []
         with self._reread_cond:
-            self._translating += 1
-        self._tr_pool.submit(self._run_translate_counted, session, jobs, tgt, names)
+            for job in jobs:
+                queue = self._queues.setdefault(job.src, deque())
+                queue.append((session, tgt, names, job))
+                self._translating += 1
+                if job.src not in self._draining:
+                    self._draining.add(job.src)
+                    start.append(job.src)
+            for src in start:
+                pool = self._lang_pools.get(src)
+                if pool is None:
+                    pool = self._lang_pools[src] = ThreadPoolExecutor(1, thread_name_prefix=f"keept-translate-{src}")
+                pool.submit(self._drain, src)
 
-    def _run_translate_counted(self, *args) -> None:
-        try:
-            self._run_translate(*args)
-        finally:
-            with self._reread_cond:
+    def wait_translations(self, timeout: float = 10.0) -> bool:
+        """Wait until no translation is queued or running (tests and tools)."""
+        end = time.perf_counter() + timeout
+        with self._reread_cond:
+            while self._translating:
+                left = end - time.perf_counter()
+                if left <= 0:
+                    return False
+                self._reread_cond.wait(left)
+        return True
+
+    def _next_batch(self, src: str):
+        """The queued jobs of `src` that can go in one batch: same session, target and names,
+        at most MAX_BATCH; only one for the first translation of a session (it shows up sooner).
+        Jobs of an old session are dropped. None when the queue is empty."""
+        with self._reread_cond:
+            queue = self._queues[src]
+            while queue and not self._alive(queue[0][0]):
+                queue.popleft()
                 self._translating -= 1
-                self._reread_cond.notify()
+            if not queue:
+                self._draining.discard(src)
+                self._reread_cond.notify_all()
+                return None
+            session, tgt, names, _ = queue[0]
+            limit = 1 if self._first_done != session else MAX_BATCH
+            batch: list[TranslationJob] = []
+            while queue and len(batch) < limit and queue[0][:3] == (session, tgt, names):
+                batch.append(queue.popleft()[3])
+            self._reread_cond.notify_all()
+            return session, tgt, names, batch
+
+    def _drain(self, src: str) -> None:
+        """Translation thread of one source language: blocks that became ready while the
+        previous batch ran go together in the next one (a batch costs much less than one call
+        per block), in reading order."""
+        while (nxt := self._next_batch(src)) is not None:
+            session, tgt, names, batch = nxt
+            try:
+                self._run_translate(session, batch, tgt, names)
+            finally:
+                with self._reread_cond:
+                    self._translating -= len(batch)
+                    self._reread_cond.notify_all()
 
     def _run_translate(self, session: int, jobs: list[TranslationJob], tgt: str,
                        names: frozenset[str] = frozenset()) -> None:
+        """Translate jobs of one source language in one batch."""
+        if not self._alive(session):
+            return
+        src = jobs[0].src
         t0 = time.perf_counter()
-        by_src: dict[str, list[TranslationJob]] = {}
-        for job in jobs:
-            by_src.setdefault(job.src, []).append(job)
-        first_logged = False
-        for src, group in by_src.items():
-            if not self._alive(session):
-                return
-            try:
-                self._prepare(session, src, tgt)
-            except ModelError as exc:
-                log.error("Model problem %s->%s: %s", src, tgt, exc)
-                self.translation_failed.emit(session, exc.kind, [j.key for j in group])
-                continue
-            except Exception:  # noqa: BLE001
-                log.exception("Could not load models %s->%s", src, tgt)
-                self.translation_failed.emit(session, "translate", [j.key for j in group])
-                continue
-            # One block first so something appears quickly, then bigger chunks for throughput.
-            i, size = 0, 1
-            while i < len(group):
-                if not self._alive(session):
-                    return
-                chunk = group[i:i + size]
-                tc = time.perf_counter()
-                try:
-                    results = self.translator.translate([j.text for j in chunk], src, tgt, names=names)
-                except Exception:  # noqa: BLE001
-                    log.exception("Translation failed")
-                    self.translation_failed.emit(session, "translate", [j.key for j in chunk])
-                    results = None
-                if results is not None:
-                    dt = time.perf_counter() - tc
-                    for job, text in zip(chunk, results):
-                        self.translated.emit(session, job.key, text)
-                    log.info("Translated %d block(s) %s->%s in %.0f ms (%.0f ms/block)",
-                             len(chunk), src, tgt, dt * 1000, dt * 1000 / len(chunk))
-                    if not first_logged:
-                        log.info("First translated block after %.0f ms", (time.perf_counter() - t0) * 1000)
-                        first_logged = True
-                i += size
-                size = 6
-        total = time.perf_counter() - t0
-        log.info("Translation of %d block(s) finished in %.0f ms", len(jobs), total * 1000)
-        self.translation_finished.emit(session, total)
+        try:
+            self._prepare(session, src, tgt)
+        except ModelError as exc:
+            log.error("Model problem %s->%s: %s", src, tgt, exc)
+            self.translation_failed.emit(session, exc.kind, [j.key for j in jobs])
+            return
+        except Exception:  # noqa: BLE001
+            log.exception("Could not load models %s->%s", src, tgt)
+            self.translation_failed.emit(session, "translate", [j.key for j in jobs])
+            return
+        if not self._alive(session):
+            return
+        tc = time.perf_counter()
+        try:
+            results = self.translator.translate([j.text for j in jobs], src, tgt, names=names)
+        except Exception:  # noqa: BLE001
+            log.exception("Translation failed")
+            self.translation_failed.emit(session, "translate", [j.key for j in jobs])
+            return
+        dt = time.perf_counter() - tc
+        for job, text in zip(jobs, results):
+            self.translated.emit(session, job.key, text)
+        with self._reread_cond:
+            first = self._first_done != session
+            self._first_done = session
+        log.info("Translated %d block(s) %s->%s in %.0f ms (%.0f ms/block)%s",
+                 len(jobs), src, tgt, dt * 1000, dt * 1000 / len(jobs), " (first of the session)" if first else "")
+        self.translation_finished.emit(session, time.perf_counter() - t0)
 
     def _prepare(self, session: int, src: str, tgt: str) -> None:
         tr = self.translator
@@ -326,6 +400,9 @@ class Engine(QObject):
         self.translator.unload_all()  # free CTranslate2 models now, not during interpreter teardown
         self._ocr_pool.shutdown(wait=False, cancel_futures=True)
         self._tr_pool.shutdown(wait=False, cancel_futures=True)
+        for pool in list(self._lang_pools.values()):
+            pool.shutdown(wait=False, cancel_futures=True)
+        self._reread_pool.shutdown(wait=False, cancel_futures=True)
         self._dl_pool.shutdown(wait=False, cancel_futures=True)
         self._load_pool.shutdown(wait=False, cancel_futures=True)
         self._ocr_pool.shutdown(wait=True, cancel_futures=True)
